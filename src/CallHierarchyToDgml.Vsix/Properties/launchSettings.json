@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "CallHierarchyToDgml.Vsix": {
+      "commandName": "Project"
+    }
+  }
+}

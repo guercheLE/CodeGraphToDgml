@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CallHierarchyToDgml.Core/CallHierarchyToDgml.Core.csproj" />
+    <Project Path="src/CallHierarchyToDgml.Vsix/CallHierarchyToDgml.Vsix.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CallHierarchyToDgml.Tests/CallHierarchyToDgml.Tests.csproj" />
+  </Folder>
+</Solution>

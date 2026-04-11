@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+
+  <Commands package="guidCallHierarchyToDgmlPackage">
+    <Groups>
+      <Group guid="guidEditorCommands" id="EditorContextMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN" />
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidEditorCommands" id="TraverseUpToDgmlCommand" priority="0x0100" type="Button">
+        <Parent guid="guidEditorCommands" id="EditorContextMenuGroup" />
+        <Strings>
+          <ButtonText>Traverse Up to DGML</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidCallHierarchyToDgmlPackage" value="{8bd0ea2c-2cc7-4466-a5d0-e19b4fd86b43}" />
+    <GuidSymbol name="guidEditorCommands" value="{eb6634f9-47c6-4ebd-9814-c5a182960783}">
+      <IDSymbol name="TraverseUpToDgmlCommand" value="0x0100" />
+      <IDSymbol name="EditorContextMenuGroup" value="0x1020" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>
