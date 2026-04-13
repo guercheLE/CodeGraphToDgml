@@ -23,10 +23,12 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
     };
 
     private readonly ToolkitPackage _package;
+    private readonly OutputWindowLogger _logger;
 
     public RoslynCallHierarchyProvider(ToolkitPackage package)
     {
         _package = package;
+        _logger = new OutputWindowLogger(package);
     }
 
     public string Id => "Roslyn";
@@ -69,14 +71,23 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
         var position = Math.Max(0, selection.ActivePoint.AbsoluteCharOffset - 1);
 
+        await _logger.WriteLineAsync($"[ResolveSubject] Position={position}, File={activeDocument.FullName}").ConfigureAwait(false);
+
         var symbol = await ResolveSymbolAsync(document, workspace, position, cancellationToken).ConfigureAwait(false);
+
+        await _logger.WriteLineAsync($"[ResolveSubject] Raw resolved symbol: {symbol?.ToDisplayString() ?? "(null)"}, Kind={symbol?.Kind}").ConfigureAwait(false);
+
         symbol = NormalizeSymbol(symbol);
+
+        await _logger.WriteLineAsync($"[ResolveSubject] Normalized symbol: {symbol?.ToDisplayString() ?? "(null)"}, Kind={symbol?.Kind}").ConfigureAwait(false);
 
         if (symbol is null || !IsSupportedRootSymbol(symbol))
         {
+            await _logger.WriteLineAsync($"[ResolveSubject] Symbol rejected: not a supported root symbol.").ConfigureAwait(false);
             return null;
         }
 
+        await _logger.WriteLineAsync($"[ResolveSubject] Entry point resolved: {symbol.ToDisplayString()}").ConfigureAwait(false);
 
         return new HierarchySubject(
             Id,
@@ -255,39 +266,36 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             return null;
         }
 
+        var root = await semanticModel.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
+        var token = root.FindToken(position);
+        var node = token.Parent;
+
+        // Walk up the syntax tree to find the enclosing method, property, or event declaration.
+        // This ensures that when the caret is anywhere inside a method body (e.g., on a call
+        // to another method Y), the resolved symbol is the enclosing method X, not Y.
+        while (node is not null)
+        {
+            var declaredSymbol = semanticModel.GetDeclaredSymbol(node, cancellationToken);
+            if (declaredSymbol is not null)
+            {
+                var normalized = NormalizeSymbol(declaredSymbol);
+                if (normalized is not null && IsSupportedRootSymbol(normalized))
+                {
+                    return declaredSymbol;
+                }
+            }
+
+            node = node.Parent;
+        }
+
+        // Fallback for edge cases where no enclosing declaration was found (e.g., top-level statements).
         var symbol = await SymbolFinder.FindSymbolAtPositionAsync(
             semanticModel,
             position,
             workspace,
             cancellationToken).ConfigureAwait(false);
 
-        if (symbol is not null)
-        {
-            return symbol;
-        }
-
-        var root = await semanticModel.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
-        var token = root.FindToken(position);
-        var node = token.Parent;
-
-        while (node is not null)
-        {
-            symbol = semanticModel.GetDeclaredSymbol(node, cancellationToken);
-            if (symbol is not null)
-            {
-                return symbol;
-            }
-
-            symbol = semanticModel.GetSymbolInfo(node, cancellationToken).Symbol;
-            if (symbol is not null)
-            {
-                return symbol;
-            }
-
-            node = node.Parent;
-        }
-
-        return null;
+        return symbol;
     }
 
     private static RoslynDocument? GetDocument(RoslynSolution solution, string filePath)
