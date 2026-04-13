@@ -9,9 +9,9 @@ public sealed class TraversalGraphTests
     public void UpsertNode_ReplacesExistingNodeUsingOrdinalIdComparison()
     {
         var graph = new TraversalGraph();
-        graph.UpsertNode(new GraphNode("Node", "First", "Method", null, null, null));
-        graph.UpsertNode(new GraphNode("Node", "Second", "Property", null, 12, "Project"));
-        graph.UpsertNode(new GraphNode("node", "Third", "Method", null, null, null));
+        graph.UpsertNode(new GraphNode("Node", "First", "CodeSchema_Method", null, null, null));
+        graph.UpsertNode(new GraphNode("Node", "Second", "CodeSchema_Property", null, 12, "Project"));
+        graph.UpsertNode(new GraphNode("node", "Third", "CodeSchema_Method", null, null, null));
 
         Assert.AreEqual(2, graph.NodeCount);
         CollectionAssert.AreEquivalent(
@@ -23,9 +23,9 @@ public sealed class TraversalGraphTests
     public void AddLink_UsesSetSemantics()
     {
         var graph = new TraversalGraph();
-        graph.AddLink(new GraphLink("A", "B", "Calls"));
-        graph.AddLink(new GraphLink("A", "B", "Calls"));
-        graph.AddLink(new GraphLink("a", "B", "Calls"));
+        graph.AddLink(new GraphLink("A", "B", "CodeSchema_Calls"));
+        graph.AddLink(new GraphLink("A", "B", "CodeSchema_Calls"));
+        graph.AddLink(new GraphLink("a", "B", "CodeSchema_Calls"));
 
         Assert.AreEqual(2, graph.LinkCount);
     }

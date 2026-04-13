@@ -149,13 +149,13 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                     AddNodeAndContainers(graph, calledSymbol, calledSymbol.ContainingAssembly?.Name);
                     AddNodeAndContainers(graph, currentCallee!, currentCallee!.ContainingAssembly?.Name);
 
-                    graph.AddLink(new GraphLink(GetStableId(caller), GetStableId(calledSymbol), "Calls"));
+                    graph.AddLink(new GraphLink(GetStableId(caller), GetStableId(calledSymbol), "CodeSchema_Calls"));
                     graph.AddLink(new GraphLink(GetStableId(calledSymbol), GetStableId(currentCallee!), "Implements/Overrides"));
                 }
                 else if (currentCallee is not null)
                 {
                     AddNodeAndContainers(graph, currentCallee, currentCallee.ContainingAssembly?.Name);
-                    graph.AddLink(new GraphLink(GetStableId(caller), GetStableId(currentCallee), "Calls"));
+                    graph.AddLink(new GraphLink(GetStableId(caller), GetStableId(currentCallee), "CodeSchema_Calls"));
                 }
 
                 if (graph.NodeCount >= normalizedOptions.MaxNodeCount)
@@ -218,7 +218,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             var projectNode = new GraphNode(
                 projectId,
                 projectName!,
-                "Project",
+                "CodeSchema_Assembly",
                 null,
                 null,
                 projectName);
@@ -231,7 +231,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
     private static GraphNode CreateContainerNode(ISymbol container)
     {
         var category = container is INamedTypeSymbol nt ? GetContainerCategory(nt) :
-                       container is INamespaceSymbol ? "Namespace" :
+                       container is INamespaceSymbol ? "CodeSchema_Namespace" :
                        "Group";
 
         return new GraphNode(
@@ -439,9 +439,9 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
     {
         return symbol.Kind switch
         {
-            SymbolKind.Property => "Property",
-            SymbolKind.Event => "Event",
-            _ => "Method",
+            SymbolKind.Property => "CodeSchema_Property",
+            SymbolKind.Event => "CodeSchema_Event",
+            _ => "CodeSchema_Method",
         };
     }
 
@@ -449,11 +449,11 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
     {
         return container.TypeKind switch
         {
-            TypeKind.Interface => "Interface",
-            TypeKind.Struct => "Struct",
-            TypeKind.Enum => "Enum",
-            TypeKind.Delegate => "Delegate",
-            _ => "Class"
+            TypeKind.Interface => "CodeSchema_Interface",
+            TypeKind.Struct => "CodeSchema_Struct",
+            TypeKind.Enum => "CodeSchema_Enum",
+            TypeKind.Delegate => "CodeSchema_Delegate",
+            _ => "CodeSchema_Class"
         };
     }
 

@@ -18,13 +18,40 @@ public sealed class DgmlSerializerTests
         Assert.AreEqual("utf-8", document.Declaration?.Encoding);
         Assert.AreEqual("yes", document.Declaration?.Standalone);
         Assert.AreEqual("TopToBottom", (string?)document.Root?.Attribute("GraphDirection"));
+        var expectedCategories = new[]
+        {
+            "CodeSchema_Assembly", "CodeSchema_Namespace", "CodeSchema_Class", "CodeSchema_Interface",
+            "CodeSchema_Struct", "CodeSchema_Enum", "CodeSchema_Delegate", "CodeSchema_Type",
+            "CodeSchema_Method", "CodeSchema_Property", "CodeSchema_Event", "CodeSchema_Field",
+            "CodeSchema_Calls", "CodeSchema_FunctionPointer",
+            "Implements", "Contains", "References", "InheritsFrom", "Externals"
+        };
         CollectionAssert.AreEquivalent(
-            new[] { "Method", "Property", "Event", "Class", "Interface", "Struct", "Enum", "Delegate", "Calls", "Implements/Overrides", "Contains" },
+            expectedCategories,
             document.Root!
                 .Element(Namespace + "Categories")!
                 .Elements(Namespace + "Category")
                 .Select(category => (string)category.Attribute("Id")!)
                 .ToArray());
+
+        // Verify Properties section exists with expected entries
+        var properties = document.Root!
+            .Element(Namespace + "Properties")!
+            .Elements(Namespace + "Property")
+            .Select(p => (string)p.Attribute("Id")!)
+            .ToArray();
+        Assert.IsNotEmpty(properties, "Properties section should not be empty");
+        CollectionAssert.Contains(properties, "FilePath");
+        CollectionAssert.Contains(properties, "Label");
+        CollectionAssert.Contains(properties, "Group");
+
+        // Verify Styles section has both node and link styles
+        var styles = document.Root!
+            .Element(Namespace + "Styles")!
+            .Elements(Namespace + "Style")
+            .ToArray();
+        Assert.IsTrue(styles.Any(s => (string?)s.Attribute("TargetType") == "Node"), "Should have node styles");
+        Assert.IsTrue(styles.Any(s => (string?)s.Attribute("TargetType") == "Link"), "Should have link styles");
     }
 
     [TestMethod]
@@ -32,9 +59,9 @@ public sealed class DgmlSerializerTests
     {
         var serializer = new DgmlSerializer();
         var graph = new TraversalGraph();
-        graph.UpsertNode(new GraphNode("A", "Alpha", "Method", null, null, "ProjectA"));
-        graph.UpsertNode(new GraphNode("B", "Beta", "Property", "C:\\Code\\B.cs", 42, "ProjectB"));
-        graph.AddLink(new GraphLink("A", "B", "Calls"));
+        graph.UpsertNode(new GraphNode("A", "Alpha", "CodeSchema_Method", null, null, "ProjectA"));
+        graph.UpsertNode(new GraphNode("B", "Beta", "CodeSchema_Property", "C:\\Code\\B.cs", 42, "ProjectB"));
+        graph.AddLink(new GraphLink("A", "B", "CodeSchema_Calls"));
 
         var first = serializer.Merge(null, graph, replaceContents: false);
         var second = serializer.Merge(first, graph, replaceContents: false);
@@ -58,12 +85,12 @@ public sealed class DgmlSerializerTests
     {
         var serializer = new DgmlSerializer();
         var original = new TraversalGraph();
-        original.UpsertNode(new GraphNode("A", "Alpha", "Method", null, null, null));
-        original.UpsertNode(new GraphNode("B", "Beta", "Method", null, null, null));
-        original.AddLink(new GraphLink("A", "B", "Calls"));
+        original.UpsertNode(new GraphNode("A", "Alpha", "CodeSchema_Method", null, null, null));
+        original.UpsertNode(new GraphNode("B", "Beta", "CodeSchema_Method", null, null, null));
+        original.AddLink(new GraphLink("A", "B", "CodeSchema_Calls"));
 
         var replacement = new TraversalGraph();
-        replacement.UpsertNode(new GraphNode("C", "Gamma", "Event", null, null, null));
+        replacement.UpsertNode(new GraphNode("C", "Gamma", "CodeSchema_Event", null, null, null));
 
         var merged = serializer.Merge(serializer.Merge(null, original, replaceContents: false), replacement, replaceContents: true);
         var document = XDocument.Parse(merged, LoadOptions.PreserveWhitespace);

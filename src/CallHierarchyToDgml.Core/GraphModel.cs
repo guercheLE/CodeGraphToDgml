@@ -15,6 +15,26 @@ public sealed record GraphLink(
     string TargetId,
     string Category);
 
+public sealed record CategoryDefinition(
+    string Id,
+    string Label,
+    string? BasedOn = null,
+    string? Icon = null,
+    string? DefaultAction = null,
+    string? NavigationActionLabel = null,
+    string? IncomingActionLabel = null,
+    string? OutgoingActionLabel = null,
+    bool? CanBeDataDriven = null,
+    bool? CanLinkedNodesBeDataDriven = null,
+    bool? IsContainment = null,
+    string? Description = null);
+
+public sealed record PropertyDefinition(
+    string Id,
+    string? Label = null,
+    string? Description = null,
+    string DataType = "System.String");
+
 public sealed class TraversalGraph
 {
     private readonly Dictionary<string, GraphNode> _nodes = new(StringComparer.Ordinal);
