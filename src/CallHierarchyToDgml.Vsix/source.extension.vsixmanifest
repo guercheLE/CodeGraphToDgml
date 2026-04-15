@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="CallHierarchyToDgml.Vsix" Version="0.1.5" Language="en-US" Publisher="Luciano Evaristo Guerche" />
+    <Identity Id="CallHierarchyToDgml.Vsix" Version="0.1.6" Language="en-US" Publisher="Luciano Evaristo Guerche" />
     <DisplayName>Call Hierarchy to DGML</DisplayName>
     <Description xml:space="preserve">Traverse callers upward from C# and Visual Basic symbols and write the result into DGML without automatically saving the target document.</Description>
   </Metadata>

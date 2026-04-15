@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 
 namespace CallHierarchyToDgml.Core;
 
@@ -61,5 +62,65 @@ public sealed class TraversalGraph
     public bool ContainsNode(string id)
     {
         return _nodes.ContainsKey(id);
+    }
+
+    public bool RemoveNode(string id)
+    {
+        return _nodes.Remove(id);
+    }
+
+    public bool RemoveLink(GraphLink link)
+    {
+        return _links.Remove(link);
+    }
+
+    public void FlattenSingleChildNamespaces()
+    {
+        bool changed;
+        do
+        {
+            changed = false;
+            foreach (var node in _nodes.Values.ToList())
+            {
+                if (node.Kind != "CodeSchema_Namespace")
+                {
+                    continue;
+                }
+
+                var childLinks = _links
+                    .Where(l => l.SourceId == node.Id && l.Category == "Contains")
+                    .ToList();
+
+                if (childLinks.Count != 1)
+                {
+                    continue;
+                }
+
+                var onlyChildId = childLinks[0].TargetId;
+                if (!_nodes.TryGetValue(onlyChildId, out var childNode)
+                    || childNode.Kind != "CodeSchema_Namespace")
+                {
+                    continue;
+                }
+
+                var mergedLabel = node.Label + "." + childNode.Label;
+                _nodes[onlyChildId] = childNode with { Label = mergedLabel };
+
+                var incomingLinks = _links
+                    .Where(l => l.TargetId == node.Id)
+                    .ToList();
+
+                foreach (var incoming in incomingLinks)
+                {
+                    _links.Remove(incoming);
+                    _links.Add(new GraphLink(incoming.SourceId, onlyChildId, incoming.Category));
+                }
+
+                _links.Remove(childLinks[0]);
+                _nodes.Remove(node.Id);
+                changed = true;
+                break;
+            }
+        } while (changed);
     }
 }

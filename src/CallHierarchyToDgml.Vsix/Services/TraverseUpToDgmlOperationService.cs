@@ -78,14 +78,21 @@ internal sealed class TraverseUpToDgmlOperationService
                 await _outputWindowLogger.WriteLineAsync($"Target document: {targetDocument.FullPath}").ConfigureAwait(true);
             }
 
+            graph.FlattenSingleChildNamespaces();
+
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(progress.Token);
 
             progress.ReportStatus("Call Hierarchy to DGML: updating DGML...");
-            var serializer = new DgmlSerializer();
-            var mergedDgml = serializer.Merge(
-                targetDocument.ReadAllText(),
-                graph,
-                options.UpdateMode == GraphUpdateMode.Replace);
+            var existingDgml = targetDocument.ReadAllText();
+            var replaceContents = options.UpdateMode == GraphUpdateMode.Replace;
+
+            var mergedDgml = await Task.Run(() =>
+            {
+                var serializer = new DgmlSerializer();
+                return serializer.Merge(existingDgml, graph, replaceContents);
+            }).ConfigureAwait(false);
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(progress.Token);
 
             targetDocument.ReplaceAllText(mergedDgml);
 

@@ -104,4 +104,30 @@ public sealed class DgmlSerializerTests
                 .ToArray());
         Assert.AreEqual(0, document.Root!.Element(Namespace + "Links")!.Elements(Namespace + "Link").Count());
     }
+
+    [TestMethod]
+    public void Merge_ContainerNodesAreCollapsedByDefault()
+    {
+        var serializer = new DgmlSerializer();
+        var graph = new TraversalGraph();
+        graph.UpsertNode(new GraphNode("NS", "MyNamespace", "CodeSchema_Namespace", null, null, null));
+        graph.UpsertNode(new GraphNode("CLS", "MyClass", "CodeSchema_Class", null, null, null));
+        graph.AddLink(new GraphLink("NS", "CLS", "Contains"));
+
+        var result = serializer.Merge(null, graph, replaceContents: false);
+        var document = XDocument.Parse(result, LoadOptions.PreserveWhitespace);
+
+        var nsNode = document.Root!
+            .Element(Namespace + "Nodes")!
+            .Elements(Namespace + "Node")
+            .Single(n => (string?)n.Attribute("Id") == "NS");
+
+        var clsNode = document.Root!
+            .Element(Namespace + "Nodes")!
+            .Elements(Namespace + "Node")
+            .Single(n => (string?)n.Attribute("Id") == "CLS");
+
+        Assert.AreEqual("Collapsed", (string?)nsNode.Attribute("Group"));
+        Assert.AreEqual("Collapsed", (string?)clsNode.Attribute("Group"));
+    }
 }

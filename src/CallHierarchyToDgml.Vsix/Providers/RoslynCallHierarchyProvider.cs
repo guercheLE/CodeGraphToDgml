@@ -215,7 +215,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 break;
             }
 
-            var containerNode = CreateContainerNode(currentContainer);
+            var containerNode = CreateContainerNode(currentContainer, projectName);
             graph.UpsertNode(containerNode);
             graph.AddLink(new GraphLink(containerNode.Id, currentId, "Contains"));
 
@@ -239,14 +239,20 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         }
     }
 
-    private static GraphNode CreateContainerNode(ISymbol container)
+    private static GraphNode CreateContainerNode(ISymbol container, string? projectName)
     {
         var category = container is INamedTypeSymbol nt ? GetContainerCategory(nt) :
                        container is INamespaceSymbol ? "CodeSchema_Namespace" :
                        "Group";
 
+        var id = GetStableId(container);
+        if (container is INamespaceSymbol && !string.IsNullOrWhiteSpace(projectName))
+        {
+            id = $"Project={projectName}|{id}";
+        }
+
         return new GraphNode(
-            GetStableId(container),
+            id,
             container.Name,
             category,
             null,

@@ -57,7 +57,7 @@ public sealed class DgmlSerializer
 
             if (node.Kind is "CodeSchema_Assembly" or "CodeSchema_Namespace" or "CodeSchema_Class" or "CodeSchema_Interface" or "CodeSchema_Struct" or "CodeSchema_Enum" or "CodeSchema_Delegate")
             {
-                nodeElement.SetAttributeValue("Group", "Expanded");
+                nodeElement.SetAttributeValue("Group", "Collapsed");
             }
 
             if (!string.IsNullOrWhiteSpace(node.FilePath))
