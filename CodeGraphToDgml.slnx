@@ -1,9 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/CodeGraphToDgml.Core/CodeGraphToDgml.Core.csproj" />
-    <Project Path="src/CodeGraphToDgml.Vsix/CodeGraphToDgml.Vsix.csproj">
-      <Deploy />
-    </Project>
+    <Project Path="src/CodeGraphToDgml.Vsix/CodeGraphToDgml.Vsix.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/CodeGraphToDgml.Tests/CodeGraphToDgml.Tests.csproj" />

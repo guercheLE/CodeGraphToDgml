@@ -1,0 +1,7 @@
+{
+  "profiles": {
+    "CodeGraphToDgml.Vsix": {
+      "commandName": "Project"
+    }
+  }
+}
