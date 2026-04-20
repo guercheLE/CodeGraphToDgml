@@ -278,36 +278,6 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             var currentNormalized = NormalizeSymbol(current)!;
             var currentProject = currentNormalized.ContainingAssembly?.Name;
 
-            // Handle overridden/implemented base methods
-            var baseSymbols = GetImplementedAndOverriddenSymbols(currentNormalized);
-            foreach (var baseSymbol in baseSymbols)
-            {
-                var normalizedBase = NormalizeSymbol(baseSymbol);
-                if (normalizedBase is null || !IsAllowed(normalizedBase, normalizedOptions))
-                {
-                    continue;
-                }
-
-                var baseProject = normalizedBase.ContainingAssembly?.Name;
-                var relationshipCategory = normalizedBase.ContainingType?.TypeKind == TypeKind.Interface ? "Implements" : "Overrides";
-
-                AddNodeAndContainers(graph, currentNormalized, currentProject);
-                AddNodeAndContainers(graph, normalizedBase, baseProject);
-
-                // Note: The link direction follows what DGML expects for 'Implements'/'Overrides': current -> base
-                graph.AddLink(new GraphLink(
-                    GetProjectScopedId(currentNormalized, currentProject),
-                    GetProjectScopedId(normalizedBase, baseProject),
-                    relationshipCategory));
-
-                if (graph.NodeCount >= normalizedOptions.MaxNodeCount)
-                {
-                    return graph;
-                }
-
-                Enqueue(normalizedBase, depth + 1);
-            }
-
             var callees = await FindCalleesAsync(current, roslynSubject.Solution, cancellationToken).ConfigureAwait(false);
 
             foreach (var callee in callees)
@@ -336,6 +306,50 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 }
 
                 Enqueue(normalized, depth + 1);
+
+                if (normalized.ContainingType?.TypeKind == TypeKind.Interface)
+                {
+                    var implementations = await SymbolFinder.FindImplementationsAsync(normalized, roslynSubject.Solution, cancellationToken: cancellationToken).ConfigureAwait(false);
+                    foreach (var impl in implementations)
+                    {
+                        var normImpl = NormalizeSymbol(impl);
+                        if (normImpl != null && IsAllowed(normImpl, normalizedOptions))
+                        {
+                            var implProject = normImpl.ContainingAssembly?.Name;
+                            AddNodeAndContainers(graph, normImpl, implProject);
+                            
+                            graph.AddLink(new GraphLink(
+                                GetProjectScopedId(normImpl, implProject),
+                                GetProjectScopedId(normalized, calleeProject),
+                                "Implements"));
+
+                            if (graph.NodeCount >= normalizedOptions.MaxNodeCount) return graph;
+                            Enqueue(normImpl, depth + 1);
+                        }
+                    }
+                }
+
+                if (normalized.IsOverride)
+                {
+                    var baseSymbol = GetOverriddenSymbol(normalized);
+                    if (baseSymbol != null)
+                    {
+                        var normBase = NormalizeSymbol(baseSymbol);
+                        if (normBase != null && IsAllowed(normBase, normalizedOptions))
+                        {
+                            var baseProject = normBase.ContainingAssembly?.Name;
+                            AddNodeAndContainers(graph, normBase, baseProject);
+
+                            graph.AddLink(new GraphLink(
+                                GetProjectScopedId(normalized, calleeProject),
+                                GetProjectScopedId(normBase, baseProject),
+                                "Overrides"));
+
+                            if (graph.NodeCount >= normalizedOptions.MaxNodeCount) return graph;
+                            Enqueue(normBase, depth + 1);
+                        }
+                    }
+                }
             }
         }
 
@@ -361,89 +375,12 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         }
     }
 
-    private static IEnumerable<ISymbol> GetImplementedAndOverriddenSymbols(ISymbol symbol)
+    private static ISymbol? GetOverriddenSymbol(ISymbol symbol)
     {
-        if (symbol is IMethodSymbol method)
-        {
-            if (method.OverriddenMethod is not null)
-            {
-                yield return method.OverriddenMethod;
-            }
-
-            foreach (var implemented in method.ExplicitInterfaceImplementations)
-            {
-                yield return implemented;
-            }
-
-            if (method.ContainingType is not null)
-            {
-                foreach (var iface in method.ContainingType.AllInterfaces)
-                {
-                    foreach (var iMember in iface.GetMembers().OfType<IMethodSymbol>())
-                    {
-                        var implementation = method.ContainingType.FindImplementationForInterfaceMember(iMember);
-                        if (SymbolEqualityComparer.Default.Equals(implementation, method))
-                        {
-                            yield return iMember;
-                        }
-                    }
-                }
-            }
-        }
-        else if (symbol is IPropertySymbol property)
-        {
-            if (property.OverriddenProperty is not null)
-            {
-                yield return property.OverriddenProperty;
-            }
-
-            foreach (var implemented in property.ExplicitInterfaceImplementations)
-            {
-                yield return implemented;
-            }
-
-            if (property.ContainingType is not null)
-            {
-                foreach (var iface in property.ContainingType.AllInterfaces)
-                {
-                    foreach (var iMember in iface.GetMembers().OfType<IPropertySymbol>())
-                    {
-                        var implementation = property.ContainingType.FindImplementationForInterfaceMember(iMember);
-                        if (SymbolEqualityComparer.Default.Equals(implementation, property))
-                        {
-                            yield return iMember;
-                        }
-                    }
-                }
-            }
-        }
-        else if (symbol is IEventSymbol evt)
-        {
-            if (evt.OverriddenEvent is not null)
-            {
-                yield return evt.OverriddenEvent;
-            }
-
-            foreach (var implemented in evt.ExplicitInterfaceImplementations)
-            {
-                yield return implemented;
-            }
-
-            if (evt.ContainingType is not null)
-            {
-                foreach (var iface in evt.ContainingType.AllInterfaces)
-                {
-                    foreach (var iMember in iface.GetMembers().OfType<IEventSymbol>())
-                    {
-                        var implementation = evt.ContainingType.FindImplementationForInterfaceMember(iMember);
-                        if (SymbolEqualityComparer.Default.Equals(implementation, evt))
-                        {
-                            yield return iMember;
-                        }
-                    }
-                }
-            }
-        }
+        if (symbol is IMethodSymbol method) return method.OverriddenMethod;
+        if (symbol is IPropertySymbol property) return property.OverriddenProperty;
+        if (symbol is IEventSymbol evt) return evt.OverriddenEvent;
+        return null;
     }
 
     private static async Task<IReadOnlyList<ISymbol>> FindCalleesAsync(
