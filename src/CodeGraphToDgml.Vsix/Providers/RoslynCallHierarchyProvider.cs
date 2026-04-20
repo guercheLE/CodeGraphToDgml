@@ -164,7 +164,8 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                     AddNodeAndContainers(graph, currentCallee, calleeProject);
 
                     graph.AddLink(new GraphLink(GetProjectScopedId(caller, callerProject), GetProjectScopedId(calledSymbol, calledProject), "CodeSchema_Calls"));
-                    graph.AddLink(new GraphLink(GetProjectScopedId(calledSymbol, calledProject), GetProjectScopedId(currentCallee, calleeProject), "Implements/Overrides"));
+                    var relationshipCategory = calledSymbol.ContainingType?.TypeKind == TypeKind.Interface ? "Implements" : "Overrides";
+                    graph.AddLink(new GraphLink(GetProjectScopedId(calledSymbol, calledProject), GetProjectScopedId(currentCallee, calleeProject), relationshipCategory));
                 }
                 else if (currentCallee is not null)
                 {
@@ -291,12 +292,28 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             ? ns.ToDisplayString()
             : container.Name;
 
+        string? filePath = null;
+        int? lineNumber = null;
+
+        var location = container.Locations.FirstOrDefault(candidate => candidate.IsInSource);
+        if (location is null && container.DeclaringSyntaxReferences.Length > 0)
+        {
+            location = container.DeclaringSyntaxReferences[0].GetSyntax().GetLocation();
+        }
+
+        var lineSpan = location?.GetLineSpan();
+        if (lineSpan.HasValue)
+        {
+            filePath = lineSpan.Value.Path;
+            lineNumber = lineSpan.Value.StartLinePosition.Line + 1;
+        }
+
         return new GraphNode(
             id,
             label,
             category,
-            null,
-            null,
+            filePath,
+            lineNumber,
             null);
     }
 
@@ -484,14 +501,27 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
     private static GraphNode CreateNode(ISymbol symbol, string? projectName = null)
     {
         var location = symbol.Locations.FirstOrDefault(candidate => candidate.IsInSource);
+        if (location == null && symbol.DeclaringSyntaxReferences.Length > 0)
+        {
+            location = symbol.DeclaringSyntaxReferences[0].GetSyntax().GetLocation();
+        }
         var lineSpan = location?.GetLineSpan();
+
+        string? filePath = null;
+        int? lineNumber = null;
+
+        if (lineSpan.HasValue)
+        {
+            filePath = lineSpan.Value.Path;
+            lineNumber = lineSpan.Value.StartLinePosition.Line + 1;
+        }
 
         return new GraphNode(
             GetProjectScopedId(symbol, projectName),
             GetNodeLabel(symbol),
             GetCategory(symbol),
-            lineSpan?.Path,
-            lineSpan is null ? null : lineSpan.Value.StartLinePosition.Line + 1,
+            filePath,
+            lineNumber,
             symbol.ContainingAssembly?.Name);
     }
 

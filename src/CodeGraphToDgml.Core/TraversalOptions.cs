@@ -18,6 +18,8 @@ public sealed class TraversalOptions
 
     public int MaxHostDepth { get; init; } = 3;
 
+    public bool CollapseGroups { get; init; }
+
     public TraversalOptions Normalize()
     {
         return new TraversalOptions
@@ -30,6 +32,7 @@ public sealed class TraversalOptions
             IncludeGeneratedCode = IncludeGeneratedCode,
             IncludeComponentHosts = IncludeComponentHosts,
             MaxHostDepth = MaxHostDepth < 1 ? 1 : MaxHostDepth,
+            CollapseGroups = CollapseGroups,
         };
     }
 }

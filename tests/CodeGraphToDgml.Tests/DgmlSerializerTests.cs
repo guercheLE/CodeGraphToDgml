@@ -106,7 +106,7 @@ public sealed class DgmlSerializerTests
     }
 
     [TestMethod]
-    public void Merge_ContainerNodesAreCollapsedByDefault()
+    public void Merge_ContainerNodesAreExpandedByDefault()
     {
         var serializer = new DgmlSerializer();
         var graph = new TraversalGraph();
@@ -115,6 +115,32 @@ public sealed class DgmlSerializerTests
         graph.AddLink(new GraphLink("NS", "CLS", "Contains"));
 
         var result = serializer.Merge(null, graph, replaceContents: false);
+        var document = XDocument.Parse(result, LoadOptions.PreserveWhitespace);
+
+        var nsNode = document.Root!
+            .Element(Namespace + "Nodes")!
+            .Elements(Namespace + "Node")
+            .Single(n => (string?)n.Attribute("Id") == "NS");
+
+        var clsNode = document.Root!
+            .Element(Namespace + "Nodes")!
+            .Elements(Namespace + "Node")
+            .Single(n => (string?)n.Attribute("Id") == "CLS");
+
+        Assert.AreEqual("Expanded", (string?)nsNode.Attribute("Group"));
+        Assert.AreEqual("Expanded", (string?)clsNode.Attribute("Group"));
+    }
+
+    [TestMethod]
+    public void Merge_ContainerNodesAreCollapsedWhenOptionSet()
+    {
+        var serializer = new DgmlSerializer();
+        var graph = new TraversalGraph();
+        graph.UpsertNode(new GraphNode("NS", "MyNamespace", "CodeSchema_Namespace", null, null, null));
+        graph.UpsertNode(new GraphNode("CLS", "MyClass", "CodeSchema_Class", null, null, null));
+        graph.AddLink(new GraphLink("NS", "CLS", "Contains"));
+
+        var result = serializer.Merge(null, graph, replaceContents: false, collapseGroups: true);
         var document = XDocument.Parse(result, LoadOptions.PreserveWhitespace);
 
         var nsNode = document.Root!

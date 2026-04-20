@@ -99,12 +99,6 @@ internal sealed class RoslynReferencesProvider
         visitedIds.Add(RoslynGraphHelpers.GetProjectScopedId(rootType, rootProject));
         queue.Enqueue((rootType, 0));
 
-        // Add base type chain for root
-        AddBaseTypeChain(graph, rootType, rootProject);
-
-        // Add implemented interfaces for root
-        AddImplementedInterfaces(graph, rootType, rootProject);
-
         while (queue.Count > 0)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -142,9 +136,9 @@ internal sealed class RoslynReferencesProvider
                 RoslynGraphHelpers.AddNodeAndContainers(graph, derivedOriginal, derivedProject);
 
                 graph.AddLink(new GraphLink(
-                    RoslynGraphHelpers.GetProjectScopedId(derivedOriginal, derivedProject),
                     RoslynGraphHelpers.GetProjectScopedId(currentType, currentType.ContainingAssembly?.Name),
-                    "InheritsFrom"));
+                    RoslynGraphHelpers.GetProjectScopedId(derivedOriginal, derivedProject),
+                    "Overrides"));
 
                 if (graph.NodeCount >= normalizedOptions.MaxNodeCount)
                 {
@@ -185,8 +179,8 @@ internal sealed class RoslynReferencesProvider
                     RoslynGraphHelpers.AddNodeAndContainers(graph, implOriginal, implProject);
 
                     graph.AddLink(new GraphLink(
-                        RoslynGraphHelpers.GetProjectScopedId(implOriginal, implProject),
                         RoslynGraphHelpers.GetProjectScopedId(currentType, currentType.ContainingAssembly?.Name),
+                        RoslynGraphHelpers.GetProjectScopedId(implOriginal, implProject),
                         "Implements"));
 
                     if (graph.NodeCount >= normalizedOptions.MaxNodeCount)
@@ -203,44 +197,6 @@ internal sealed class RoslynReferencesProvider
         }
 
         return graph;
-    }
-
-    private static void AddBaseTypeChain(TraversalGraph graph, INamedTypeSymbol type, string? projectName)
-    {
-        var current = type;
-        while (current.BaseType is not null)
-        {
-            var baseType = current.BaseType.OriginalDefinition;
-            if (baseType.SpecialType == SpecialType.System_Object)
-            {
-                break;
-            }
-
-            var baseProject = baseType.ContainingAssembly?.Name;
-            RoslynGraphHelpers.AddNodeAndContainers(graph, baseType, baseProject);
-
-            graph.AddLink(new GraphLink(
-                RoslynGraphHelpers.GetProjectScopedId(current, current.ContainingAssembly?.Name),
-                RoslynGraphHelpers.GetProjectScopedId(baseType, baseProject),
-                "InheritsFrom"));
-
-            current = baseType;
-        }
-    }
-
-    private static void AddImplementedInterfaces(TraversalGraph graph, INamedTypeSymbol type, string? projectName)
-    {
-        foreach (var iface in type.Interfaces)
-        {
-            var ifaceOriginal = iface.OriginalDefinition;
-            var ifaceProject = ifaceOriginal.ContainingAssembly?.Name;
-            RoslynGraphHelpers.AddNodeAndContainers(graph, ifaceOriginal, ifaceProject);
-
-            graph.AddLink(new GraphLink(
-                RoslynGraphHelpers.GetProjectScopedId(type, type.ContainingAssembly?.Name),
-                RoslynGraphHelpers.GetProjectScopedId(ifaceOriginal, ifaceProject),
-                "Implements"));
-        }
     }
 
     private static async Task<ISymbol?> ResolveTypeSymbolAsync(

@@ -11,7 +11,7 @@ public sealed class DgmlSerializer
 {
     private static readonly XNamespace Namespace = "http://schemas.microsoft.com/vs/2009/dgml";
 
-    public string Merge(string? existingDgml, TraversalGraph graph, bool replaceContents)
+    public string Merge(string? existingDgml, TraversalGraph graph, bool replaceContents, bool collapseGroups = false)
     {
         var document = string.IsNullOrWhiteSpace(existingDgml)
             ? CreateEmptyDocument()
@@ -57,7 +57,7 @@ public sealed class DgmlSerializer
 
             if (node.Kind is "CodeSchema_Assembly" or "CodeSchema_Namespace" or "CodeSchema_Class" or "CodeSchema_Interface" or "CodeSchema_Struct" or "CodeSchema_Enum" or "CodeSchema_Delegate")
             {
-                nodeElement.SetAttributeValue("Group", "Collapsed");
+                nodeElement.SetAttributeValue("Group", collapseGroups ? "Collapsed" : "Expanded");
             }
 
             if (!string.IsNullOrWhiteSpace(node.FilePath))

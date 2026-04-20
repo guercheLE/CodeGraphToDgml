@@ -76,6 +76,12 @@ internal class General : BaseOptionModel<General>
     public int MaxHostDepth { get; set; } = 3;
 
     [Category("DGML")]
+    [DisplayName("Collapse groups")]
+    [Description("When enabled, namespace, class, and other container nodes start collapsed in the DGML graph.")]
+    [DefaultValue(false)]
+    public bool CollapseGroups { get; set; }
+
+    [Category("DGML")]
     [DisplayName("Target document behavior")]
     [Description("Controls how the command chooses the DGML document to update.")]
     [DefaultValue(DgmlDocumentOpenBehavior.AlwaysAsk)]
@@ -113,6 +119,7 @@ internal class General : BaseOptionModel<General>
             IncludeGeneratedCode = IncludeGeneratedCode,
             IncludeComponentHosts = IncludeComponentHosts,
             MaxHostDepth = MaxHostDepth,
+            CollapseGroups = CollapseGroups,
         }.Normalize();
     }
 }

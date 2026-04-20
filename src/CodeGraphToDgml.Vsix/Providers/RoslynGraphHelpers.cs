@@ -70,14 +70,27 @@ internal static class RoslynGraphHelpers
     internal static GraphNode CreateNode(ISymbol symbol, string? projectName = null)
     {
         var location = symbol.Locations.FirstOrDefault(candidate => candidate.IsInSource);
+        if (location == null && symbol.DeclaringSyntaxReferences.Length > 0)
+        {
+            location = symbol.DeclaringSyntaxReferences[0].GetSyntax().GetLocation();
+        }
         var lineSpan = location?.GetLineSpan();
+
+        string? filePath = null;
+        int? lineNumber = null;
+
+        if (lineSpan.HasValue)
+        {
+            filePath = lineSpan.Value.Path;
+            lineNumber = lineSpan.Value.StartLinePosition.Line + 1;
+        }
 
         return new GraphNode(
             GetProjectScopedId(symbol, projectName),
             GetNodeLabel(symbol),
             GetCategory(symbol),
-            lineSpan?.Path,
-            lineSpan is null ? null : lineSpan.Value.StartLinePosition.Line + 1,
+            filePath,
+            lineNumber,
             symbol.ContainingAssembly?.Name);
     }
 
@@ -97,12 +110,28 @@ internal static class RoslynGraphHelpers
             ? ns.ToDisplayString()
             : container.Name;
 
+        string? filePath = null;
+        int? lineNumber = null;
+
+        var location = container.Locations.FirstOrDefault(candidate => candidate.IsInSource);
+        if (location is null && container.DeclaringSyntaxReferences.Length > 0)
+        {
+            location = container.DeclaringSyntaxReferences[0].GetSyntax().GetLocation();
+        }
+
+        var lineSpan = location?.GetLineSpan();
+        if (lineSpan.HasValue)
+        {
+            filePath = lineSpan.Value.Path;
+            lineNumber = lineSpan.Value.StartLinePosition.Line + 1;
+        }
+
         return new GraphNode(
             id,
             label,
             category,
-            null,
-            null,
+            filePath,
+            lineNumber,
             null);
     }
 
