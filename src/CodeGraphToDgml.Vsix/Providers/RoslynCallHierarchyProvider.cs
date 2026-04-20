@@ -309,46 +309,14 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
                 if (normalized.ContainingType?.TypeKind == TypeKind.Interface)
                 {
-                    var implementations = await SymbolFinder.FindImplementationsAsync(normalized, roslynSubject.Solution, cancellationToken: cancellationToken).ConfigureAwait(false);
-                    foreach (var impl in implementations)
-                    {
-                        var normImpl = NormalizeSymbol(impl);
-                        if (normImpl != null && IsAllowed(normImpl, normalizedOptions))
-                        {
-                            var implProject = normImpl.ContainingAssembly?.Name;
-                            AddNodeAndContainers(graph, normImpl, implProject);
-                            
-                            graph.AddLink(new GraphLink(
-                                GetProjectScopedId(normalized, calleeProject),
-                                GetProjectScopedId(normImpl, implProject),
-                                "Implements"));
-
-                            if (graph.NodeCount >= normalizedOptions.MaxNodeCount) return graph;
-                            Enqueue(normImpl, depth + 1);
-                        }
-                    }
+                    if (await AddInterfaceImplementationsAsync(graph, normalized, calleeProject, roslynSubject.Solution, normalizedOptions, depth, Enqueue, cancellationToken).ConfigureAwait(false))
+                        return graph;
                 }
 
                 if (normalized.IsOverride)
                 {
-                    var baseSymbol = GetOverriddenSymbol(normalized);
-                    if (baseSymbol != null)
-                    {
-                        var normBase = NormalizeSymbol(baseSymbol);
-                        if (normBase != null && IsAllowed(normBase, normalizedOptions))
-                        {
-                            var baseProject = normBase.ContainingAssembly?.Name;
-                            AddNodeAndContainers(graph, normBase, baseProject);
-
-                            graph.AddLink(new GraphLink(
-                                GetProjectScopedId(normBase, baseProject),
-                                GetProjectScopedId(normalized, calleeProject),
-                                "Overrides"));
-
-                            if (graph.NodeCount >= normalizedOptions.MaxNodeCount) return graph;
-                            Enqueue(normBase, depth + 1);
-                        }
-                    }
+                    if (AddOverriddenBase(graph, normalized, calleeProject, normalizedOptions, depth, Enqueue))
+                        return graph;
                 }
             }
         }
@@ -373,6 +341,82 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             AddNodeAndContainers(graph, normalized, projectName);
             queue.Enqueue((normalized, depth));
         }
+    }
+
+    /// <summary>
+    /// For a callee that is an interface member, finds all implementations across the solution,
+    /// adds them to the graph with an <c>Implements</c> link from the interface member to each
+    /// implementation, and enqueues them for further traversal.
+    /// Returns <see langword="true"/> when the node limit has been reached.
+    /// </summary>
+    private static async Task<bool> AddInterfaceImplementationsAsync(
+        TraversalGraph graph,
+        ISymbol interfaceMember,
+        string? interfaceProject,
+        RoslynSolution solution,
+        TraversalOptions options,
+        int depth,
+        Action<ISymbol, int> enqueue,
+        CancellationToken cancellationToken)
+    {
+        var implementations = await SymbolFinder.FindImplementationsAsync(
+            interfaceMember, solution, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        foreach (var impl in implementations)
+        {
+            var normImpl = NormalizeSymbol(impl);
+            if (normImpl is null || !IsAllowed(normImpl, options))
+            {
+                continue;
+            }
+
+            var implProject = normImpl.ContainingAssembly?.Name;
+            AddNodeAndContainers(graph, normImpl, implProject);
+
+            graph.AddLink(new GraphLink(
+                GetProjectScopedId(interfaceMember, interfaceProject),
+                GetProjectScopedId(normImpl, implProject),
+                "Implements"));
+
+            if (graph.NodeCount >= options.MaxNodeCount) return true;
+            enqueue(normImpl, depth + 1);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// For a callee that overrides a base member, adds the base member to the graph with an
+    /// <c>Overrides</c> link from the base member to the overriding member, and enqueues the
+    /// base member for further traversal.
+    /// Returns <see langword="true"/> when the node limit has been reached.
+    /// </summary>
+    private static bool AddOverriddenBase(
+        TraversalGraph graph,
+        ISymbol overridingMember,
+        string? overridingProject,
+        TraversalOptions options,
+        int depth,
+        Action<ISymbol, int> enqueue)
+    {
+        var baseSymbol = GetOverriddenSymbol(overridingMember);
+        if (baseSymbol is null) return false;
+
+        var normBase = NormalizeSymbol(baseSymbol);
+        if (normBase is null || !IsAllowed(normBase, options)) return false;
+
+        var baseProject = normBase.ContainingAssembly?.Name;
+        AddNodeAndContainers(graph, normBase, baseProject);
+
+        graph.AddLink(new GraphLink(
+            GetProjectScopedId(normBase, baseProject),
+            GetProjectScopedId(overridingMember, overridingProject),
+            "Overrides"));
+
+        if (graph.NodeCount >= options.MaxNodeCount) return true;
+        enqueue(normBase, depth + 1);
+
+        return false;
     }
 
     private static ISymbol? GetOverriddenSymbol(ISymbol symbol)
@@ -499,21 +543,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             ? ns.ToDisplayString()
             : container.Name;
 
-        string? filePath = null;
-        int? lineNumber = null;
-
-        var location = container.Locations.FirstOrDefault(candidate => candidate.IsInSource);
-        if (location is null && container.DeclaringSyntaxReferences.Length > 0)
-        {
-            location = container.DeclaringSyntaxReferences[0].GetSyntax().GetLocation();
-        }
-
-        var lineSpan = location?.GetLineSpan();
-        if (lineSpan.HasValue)
-        {
-            filePath = lineSpan.Value.Path;
-            lineNumber = lineSpan.Value.StartLinePosition.Line + 1;
-        }
+        var (filePath, lineNumber) = GetDeclarationLocation(container);
 
         return new GraphNode(
             id,
@@ -707,21 +737,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
     private static GraphNode CreateNode(ISymbol symbol, string? projectName = null)
     {
-        var location = symbol.Locations.FirstOrDefault(candidate => candidate.IsInSource);
-        if (location == null && symbol.DeclaringSyntaxReferences.Length > 0)
-        {
-            location = symbol.DeclaringSyntaxReferences[0].GetSyntax().GetLocation();
-        }
-        var lineSpan = location?.GetLineSpan();
-
-        string? filePath = null;
-        int? lineNumber = null;
-
-        if (lineSpan.HasValue)
-        {
-            filePath = lineSpan.Value.Path;
-            lineNumber = lineSpan.Value.StartLinePosition.Line + 1;
-        }
+        var (filePath, lineNumber) = GetDeclarationLocation(symbol);
 
         return new GraphNode(
             GetProjectScopedId(symbol, projectName),
@@ -740,13 +756,64 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         }
 
         var name = symbol.Name;
+
+        // Explicit interface implementations in C# include the interface name as a qualifier
+        // (e.g. "IFoo.Bar"). Strip the qualifier so the label shows only the member name.
         var lastDot = name.LastIndexOf('.');
         if (lastDot >= 0 && lastDot < name.Length - 1)
         {
             name = name.Substring(lastDot + 1);
         }
 
+        // Guard against synthesised or metadata symbols that have an empty Name.
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+        }
+
         return name;
+    }
+
+    /// <summary>
+    /// Returns the source file path and 1-based line number of a symbol's declaration identifier.
+    /// Prefers <see cref="ISymbol.Locations"/> (which Roslyn sets to the identifier token for
+    /// named source symbols) and falls back to scanning the declaring syntax node's child tokens
+    /// for the name token, then to the declaring syntax node's own start position.
+    /// </summary>
+    private static (string? FilePath, int? Line) GetDeclarationLocation(ISymbol symbol)
+    {
+        // Roslyn sets Locations[0] to the identifier token for most named source symbols.
+        var inSourceLocation = symbol.Locations.FirstOrDefault(l => l.IsInSource);
+        if (inSourceLocation is not null)
+        {
+            var span = inSourceLocation.GetLineSpan();
+            return (span.Path, span.StartLinePosition.Line + 1);
+        }
+
+        // For metadata-only symbols, DeclaringSyntaxReferences is empty – nothing to fall back to.
+        if (symbol.DeclaringSyntaxReferences.Length == 0)
+        {
+            return (null, null);
+        }
+
+        // Fallback: scan the declaring syntax node for the child token matching the symbol name.
+        // This pinpoints the identifier precisely rather than using the full declaration span.
+        var syntaxNode = symbol.DeclaringSyntaxReferences[0].GetSyntax();
+        if (!string.IsNullOrEmpty(symbol.Name))
+        {
+            foreach (var token in syntaxNode.ChildTokens())
+            {
+                if (!token.IsMissing && token.ValueText == symbol.Name)
+                {
+                    var tokenSpan = token.GetLocation().GetLineSpan();
+                    return (tokenSpan.Path, tokenSpan.StartLinePosition.Line + 1);
+                }
+            }
+        }
+
+        // Last resort: use the start of the declaring syntax node.
+        var nodeSpan = syntaxNode.GetLocation().GetLineSpan();
+        return (nodeSpan.Path, nodeSpan.StartLinePosition.Line + 1);
     }
 
     private static string GetCategory(ISymbol symbol)

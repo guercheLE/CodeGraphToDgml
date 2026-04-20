@@ -69,21 +69,7 @@ internal static class RoslynGraphHelpers
 
     internal static GraphNode CreateNode(ISymbol symbol, string? projectName = null)
     {
-        var location = symbol.Locations.FirstOrDefault(candidate => candidate.IsInSource);
-        if (location == null && symbol.DeclaringSyntaxReferences.Length > 0)
-        {
-            location = symbol.DeclaringSyntaxReferences[0].GetSyntax().GetLocation();
-        }
-        var lineSpan = location?.GetLineSpan();
-
-        string? filePath = null;
-        int? lineNumber = null;
-
-        if (lineSpan.HasValue)
-        {
-            filePath = lineSpan.Value.Path;
-            lineNumber = lineSpan.Value.StartLinePosition.Line + 1;
-        }
+        var (filePath, lineNumber) = GetDeclarationLocation(symbol);
 
         return new GraphNode(
             GetProjectScopedId(symbol, projectName),
@@ -108,21 +94,7 @@ internal static class RoslynGraphHelpers
             ? ns.ToDisplayString()
             : container.Name;
 
-        string? filePath = null;
-        int? lineNumber = null;
-
-        var location = container.Locations.FirstOrDefault(candidate => candidate.IsInSource);
-        if (location is null && container.DeclaringSyntaxReferences.Length > 0)
-        {
-            location = container.DeclaringSyntaxReferences[0].GetSyntax().GetLocation();
-        }
-
-        var lineSpan = location?.GetLineSpan();
-        if (lineSpan.HasValue)
-        {
-            filePath = lineSpan.Value.Path;
-            lineNumber = lineSpan.Value.StartLinePosition.Line + 1;
-        }
+        var (filePath, lineNumber) = GetDeclarationLocation(container);
 
         return new GraphNode(
             id,
@@ -168,13 +140,64 @@ internal static class RoslynGraphHelpers
         }
 
         var name = symbol.Name;
+
+        // Explicit interface implementations in C# include the interface name as a qualifier
+        // (e.g. "IFoo.Bar"). Strip the qualifier so the label shows only the member name.
         var lastDot = name.LastIndexOf('.');
         if (lastDot >= 0 && lastDot < name.Length - 1)
         {
             name = name.Substring(lastDot + 1);
         }
 
+        // Guard against synthesised or metadata symbols that have an empty Name.
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            name = symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+        }
+
         return name;
+    }
+
+    /// <summary>
+    /// Returns the source file path and 1-based line number of a symbol's declaration identifier.
+    /// Prefers <see cref="ISymbol.Locations"/> (which Roslyn sets to the identifier token for
+    /// named source symbols) and falls back to scanning the declaring syntax node's child tokens
+    /// for the name token, then to the declaring syntax node's own start position.
+    /// </summary>
+    private static (string? FilePath, int? Line) GetDeclarationLocation(ISymbol symbol)
+    {
+        // Roslyn sets Locations[0] to the identifier token for most named source symbols.
+        var inSourceLocation = symbol.Locations.FirstOrDefault(l => l.IsInSource);
+        if (inSourceLocation is not null)
+        {
+            var span = inSourceLocation.GetLineSpan();
+            return (span.Path, span.StartLinePosition.Line + 1);
+        }
+
+        // For metadata-only symbols, DeclaringSyntaxReferences is empty – nothing to fall back to.
+        if (symbol.DeclaringSyntaxReferences.Length == 0)
+        {
+            return (null, null);
+        }
+
+        // Fallback: scan the declaring syntax node for the child token matching the symbol name.
+        // This pinpoints the identifier precisely rather than using the full declaration span.
+        var syntaxNode = symbol.DeclaringSyntaxReferences[0].GetSyntax();
+        if (!string.IsNullOrEmpty(symbol.Name))
+        {
+            foreach (var token in syntaxNode.ChildTokens())
+            {
+                if (!token.IsMissing && token.ValueText == symbol.Name)
+                {
+                    var tokenSpan = token.GetLocation().GetLineSpan();
+                    return (tokenSpan.Path, tokenSpan.StartLinePosition.Line + 1);
+                }
+            }
+        }
+
+        // Last resort: use the start of the declaring syntax node.
+        var nodeSpan = syntaxNode.GetLocation().GetLineSpan();
+        return (nodeSpan.Path, nodeSpan.StartLinePosition.Line + 1);
     }
 
     internal static string GetCategory(ISymbol symbol)
