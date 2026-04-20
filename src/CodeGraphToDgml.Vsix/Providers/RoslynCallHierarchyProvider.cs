@@ -319,8 +319,8 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                             AddNodeAndContainers(graph, normImpl, implProject);
                             
                             graph.AddLink(new GraphLink(
-                                GetProjectScopedId(normImpl, implProject),
                                 GetProjectScopedId(normalized, calleeProject),
+                                GetProjectScopedId(normImpl, implProject),
                                 "Implements"));
 
                             if (graph.NodeCount >= normalizedOptions.MaxNodeCount) return graph;
@@ -341,8 +341,8 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                             AddNodeAndContainers(graph, normBase, baseProject);
 
                             graph.AddLink(new GraphLink(
-                                GetProjectScopedId(normalized, calleeProject),
                                 GetProjectScopedId(normBase, baseProject),
+                                GetProjectScopedId(normalized, calleeProject),
                                 "Overrides"));
 
                             if (graph.NodeCount >= normalizedOptions.MaxNodeCount) return graph;
