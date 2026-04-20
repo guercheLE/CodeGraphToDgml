@@ -275,6 +275,39 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 continue;
             }
 
+            var currentNormalized = NormalizeSymbol(current)!;
+            var currentProject = currentNormalized.ContainingAssembly?.Name;
+
+            // Handle overridden/implemented base methods
+            var baseSymbols = GetImplementedAndOverriddenSymbols(currentNormalized);
+            foreach (var baseSymbol in baseSymbols)
+            {
+                var normalizedBase = NormalizeSymbol(baseSymbol);
+                if (normalizedBase is null || !IsAllowed(normalizedBase, normalizedOptions))
+                {
+                    continue;
+                }
+
+                var baseProject = normalizedBase.ContainingAssembly?.Name;
+                var relationshipCategory = normalizedBase.ContainingType?.TypeKind == TypeKind.Interface ? "Implements" : "Overrides";
+
+                AddNodeAndContainers(graph, currentNormalized, currentProject);
+                AddNodeAndContainers(graph, normalizedBase, baseProject);
+
+                // Note: The link direction follows what DGML expects for 'Implements'/'Overrides': current -> base
+                graph.AddLink(new GraphLink(
+                    GetProjectScopedId(currentNormalized, currentProject),
+                    GetProjectScopedId(normalizedBase, baseProject),
+                    relationshipCategory));
+
+                if (graph.NodeCount >= normalizedOptions.MaxNodeCount)
+                {
+                    return graph;
+                }
+
+                Enqueue(normalizedBase, depth + 1);
+            }
+
             var callees = await FindCalleesAsync(current, roslynSubject.Solution, cancellationToken).ConfigureAwait(false);
 
             foreach (var callee in callees)
@@ -287,8 +320,6 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                     continue;
                 }
 
-                var currentNormalized = NormalizeSymbol(current)!;
-                var currentProject = currentNormalized.ContainingAssembly?.Name;
                 var calleeProject = normalized.ContainingAssembly?.Name;
 
                 AddNodeAndContainers(graph, currentNormalized, currentProject);
@@ -327,6 +358,91 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
             AddNodeAndContainers(graph, normalized, projectName);
             queue.Enqueue((normalized, depth));
+        }
+    }
+
+    private static IEnumerable<ISymbol> GetImplementedAndOverriddenSymbols(ISymbol symbol)
+    {
+        if (symbol is IMethodSymbol method)
+        {
+            if (method.OverriddenMethod is not null)
+            {
+                yield return method.OverriddenMethod;
+            }
+
+            foreach (var implemented in method.ExplicitInterfaceImplementations)
+            {
+                yield return implemented;
+            }
+
+            if (method.ContainingType is not null)
+            {
+                foreach (var iface in method.ContainingType.AllInterfaces)
+                {
+                    foreach (var iMember in iface.GetMembers().OfType<IMethodSymbol>())
+                    {
+                        var implementation = method.ContainingType.FindImplementationForInterfaceMember(iMember);
+                        if (SymbolEqualityComparer.Default.Equals(implementation, method))
+                        {
+                            yield return iMember;
+                        }
+                    }
+                }
+            }
+        }
+        else if (symbol is IPropertySymbol property)
+        {
+            if (property.OverriddenProperty is not null)
+            {
+                yield return property.OverriddenProperty;
+            }
+
+            foreach (var implemented in property.ExplicitInterfaceImplementations)
+            {
+                yield return implemented;
+            }
+
+            if (property.ContainingType is not null)
+            {
+                foreach (var iface in property.ContainingType.AllInterfaces)
+                {
+                    foreach (var iMember in iface.GetMembers().OfType<IPropertySymbol>())
+                    {
+                        var implementation = property.ContainingType.FindImplementationForInterfaceMember(iMember);
+                        if (SymbolEqualityComparer.Default.Equals(implementation, property))
+                        {
+                            yield return iMember;
+                        }
+                    }
+                }
+            }
+        }
+        else if (symbol is IEventSymbol evt)
+        {
+            if (evt.OverriddenEvent is not null)
+            {
+                yield return evt.OverriddenEvent;
+            }
+
+            foreach (var implemented in evt.ExplicitInterfaceImplementations)
+            {
+                yield return implemented;
+            }
+
+            if (evt.ContainingType is not null)
+            {
+                foreach (var iface in evt.ContainingType.AllInterfaces)
+                {
+                    foreach (var iMember in iface.GetMembers().OfType<IEventSymbol>())
+                    {
+                        var implementation = evt.ContainingType.FindImplementationForInterfaceMember(iMember);
+                        if (SymbolEqualityComparer.Default.Equals(implementation, evt))
+                        {
+                            yield return iMember;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -434,9 +550,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
     private static GraphNode CreateContainerNode(ISymbol container, string? projectName)
     {
-        var category = container is INamedTypeSymbol nt ? GetContainerCategory(nt) :
-                       container is INamespaceSymbol ? "CodeSchema_Namespace" :
-                       "Group";
+        var category = GetCategory(container);
 
         var id = GetStableId(container);
         if ((container is INamespaceSymbol || container is INamedTypeSymbol) && !string.IsNullOrWhiteSpace(projectName))
@@ -702,9 +816,13 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
     {
         return symbol.Kind switch
         {
+            SymbolKind.NamedType => GetContainerCategory((INamedTypeSymbol)symbol),
+            SymbolKind.Namespace => "CodeSchema_Namespace",
             SymbolKind.Property => "CodeSchema_Property",
             SymbolKind.Event => "CodeSchema_Event",
-            _ => "CodeSchema_Method",
+            SymbolKind.Method => "CodeSchema_Method",
+            SymbolKind.Field => "CodeSchema_Field",
+            _ => "Group",
         };
     }
 

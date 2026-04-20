@@ -96,9 +96,7 @@ internal static class RoslynGraphHelpers
 
     internal static GraphNode CreateContainerNode(ISymbol container, string? projectName)
     {
-        var category = container is INamedTypeSymbol nt ? GetContainerCategory(nt) :
-                       container is INamespaceSymbol ? "CodeSchema_Namespace" :
-                       "Group";
+        var category = GetCategory(container);
 
         var id = GetStableId(container);
         if ((container is INamespaceSymbol || container is INamedTypeSymbol) && !string.IsNullOrWhiteSpace(projectName))
@@ -184,10 +182,12 @@ internal static class RoslynGraphHelpers
         return symbol.Kind switch
         {
             SymbolKind.NamedType => GetContainerCategory((INamedTypeSymbol)symbol),
+            SymbolKind.Namespace => "CodeSchema_Namespace",
             SymbolKind.Property => "CodeSchema_Property",
             SymbolKind.Event => "CodeSchema_Event",
             SymbolKind.Method => "CodeSchema_Method",
-            _ => "CodeSchema_Method",
+            SymbolKind.Field => "CodeSchema_Field",
+            _ => "Group",
         };
     }
 
