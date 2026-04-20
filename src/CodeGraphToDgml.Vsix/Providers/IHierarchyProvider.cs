@@ -15,4 +15,10 @@ internal interface IHierarchyProvider
         TraversalOptions options,
         IProgress<TraversalProgress>? progress,
         CancellationToken cancellationToken);
+
+    Task<TraversalGraph> TraverseDownAsync(
+        HierarchySubject subject,
+        TraversalOptions options,
+        IProgress<TraversalProgress>? progress,
+        CancellationToken cancellationToken);
 }

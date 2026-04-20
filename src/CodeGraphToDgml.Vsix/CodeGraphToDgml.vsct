@@ -2,6 +2,7 @@
 <CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
   <Extern href="stdidcmd.h" />
   <Extern href="vsshlids.h" />
+  <Include href="KnownImageIds.vsct" />
 
   <Commands package="guidCodeGraphToDgmlPackage">
     <Groups>
@@ -13,12 +14,24 @@
     <Buttons>
       <Button guid="guidEditorCommands" id="TraverseUpToDgmlCommand" priority="0x0100" type="Button">
         <Parent guid="guidEditorCommands" id="EditorContextMenuGroup" />
+        <Icon guid="ImageCatalogGuid" id="CallTo" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
           <ButtonText>Traverse Up to DGML</ButtonText>
         </Strings>
       </Button>
-      <Button guid="guidEditorCommands" id="AllReferencesToDgmlCommand" priority="0x0101" type="Button">
+      <Button guid="guidEditorCommands" id="TraverseDownToDgmlCommand" priority="0x0101" type="Button">
         <Parent guid="guidEditorCommands" id="EditorContextMenuGroup" />
+        <Icon guid="ImageCatalogGuid" id="CallFrom" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Traverse Down to DGML</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidEditorCommands" id="AllReferencesToDgmlCommand" priority="0x0102" type="Button">
+        <Parent guid="guidEditorCommands" id="EditorContextMenuGroup" />
+        <Icon guid="ImageCatalogGuid" id="GoToReference" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
         <Strings>
           <ButtonText>All References to DGML</ButtonText>
         </Strings>
@@ -31,6 +44,7 @@
     <GuidSymbol name="guidEditorCommands" value="{eb6634f9-47c6-4ebd-9814-c5a182960783}">
       <IDSymbol name="TraverseUpToDgmlCommand" value="0x0100" />
       <IDSymbol name="AllReferencesToDgmlCommand" value="0x0101" />
+      <IDSymbol name="TraverseDownToDgmlCommand" value="0x0102" />
       <IDSymbol name="EditorContextMenuGroup" value="0x1020" />
     </GuidSymbol>
   </Symbols>

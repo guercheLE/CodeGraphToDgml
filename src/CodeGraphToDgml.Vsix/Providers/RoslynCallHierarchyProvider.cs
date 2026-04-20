@@ -236,6 +236,162 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         }
     }
 
+    public async Task<TraversalGraph> TraverseDownAsync(
+        HierarchySubject subject,
+        TraversalOptions options,
+        IProgress<TraversalProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (subject.Payload is not RoslynHierarchySubject roslynSubject)
+        {
+            throw new InvalidOperationException("Unexpected hierarchy subject payload.");
+        }
+
+        var normalizedOptions = options.Normalize();
+        var graph = new TraversalGraph();
+        var queuedIds = new HashSet<string>(StringComparer.Ordinal);
+        var queue = new Queue<(ISymbol Symbol, int Depth)>();
+
+        Enqueue(roslynSubject.Symbol, 0);
+
+        if (graph.NodeCount >= normalizedOptions.MaxNodeCount)
+        {
+            return graph;
+        }
+
+        while (queue.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var (current, depth) = queue.Dequeue();
+            progress?.Report(new TraversalProgress(
+                "Traversing callees",
+                depth,
+                graph.NodeCount,
+                current.ToDisplayString()));
+
+            if (depth >= normalizedOptions.MaxDepth)
+            {
+                continue;
+            }
+
+            var callees = await FindCalleesAsync(current, roslynSubject.Solution, cancellationToken).ConfigureAwait(false);
+
+            foreach (var callee in callees)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var normalized = NormalizeSymbol(callee);
+                if (normalized is null || !IsAllowed(normalized, normalizedOptions))
+                {
+                    continue;
+                }
+
+                var currentNormalized = NormalizeSymbol(current)!;
+                var currentProject = currentNormalized.ContainingAssembly?.Name;
+                var calleeProject = normalized.ContainingAssembly?.Name;
+
+                AddNodeAndContainers(graph, currentNormalized, currentProject);
+                AddNodeAndContainers(graph, normalized, calleeProject);
+
+                graph.AddLink(new GraphLink(
+                    GetProjectScopedId(currentNormalized, currentProject),
+                    GetProjectScopedId(normalized, calleeProject),
+                    "CodeSchema_Calls"));
+
+                if (graph.NodeCount >= normalizedOptions.MaxNodeCount)
+                {
+                    return graph;
+                }
+
+                Enqueue(normalized, depth + 1);
+            }
+        }
+
+        return graph;
+
+        void Enqueue(ISymbol symbol, int depth)
+        {
+            var normalized = NormalizeSymbol(symbol);
+            if (normalized is null)
+            {
+                return;
+            }
+
+            var projectName = normalized.ContainingAssembly?.Name;
+            var id = GetProjectScopedId(normalized, projectName);
+            if (!queuedIds.Add(id))
+            {
+                return;
+            }
+
+            AddNodeAndContainers(graph, normalized, projectName);
+            queue.Enqueue((normalized, depth));
+        }
+    }
+
+    private static async Task<IReadOnlyList<ISymbol>> FindCalleesAsync(
+        ISymbol symbol,
+        RoslynSolution solution,
+        CancellationToken cancellationToken)
+    {
+        var callees = new List<ISymbol>();
+        var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+
+        foreach (var syntaxRef in symbol.DeclaringSyntaxReferences)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var syntaxNode = await syntaxRef.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
+            var document = solution.GetDocument(syntaxRef.SyntaxTree);
+            if (document is null)
+            {
+                continue;
+            }
+
+            var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+            if (semanticModel is null)
+            {
+                continue;
+            }
+
+            foreach (var descendant in syntaxNode.DescendantNodes())
+            {
+                var symbolInfo = semanticModel.GetSymbolInfo(descendant, cancellationToken);
+                var resolved = symbolInfo.Symbol ?? (symbolInfo.CandidateSymbols.Length == 1 ? symbolInfo.CandidateSymbols[0] : null);
+
+                if (resolved is null)
+                {
+                    continue;
+                }
+
+                var normalized = NormalizeSymbol(resolved);
+                if (normalized is null || !IsSupportedCalleeSymbol(normalized))
+                {
+                    continue;
+                }
+
+                // Skip self-references.
+                if (SymbolEqualityComparer.Default.Equals(normalized, NormalizeSymbol(symbol)))
+                {
+                    continue;
+                }
+
+                if (seen.Add(normalized))
+                {
+                    callees.Add(normalized);
+                }
+            }
+        }
+
+        return callees;
+    }
+
+    private static bool IsSupportedCalleeSymbol(ISymbol symbol)
+    {
+        return symbol.Kind is SymbolKind.Method or SymbolKind.Property or SymbolKind.Event;
+    }
+
     private static void AddNodeAndContainers(TraversalGraph graph, ISymbol symbol, string? projectName)
     {
         var node = CreateNode(symbol, projectName);
