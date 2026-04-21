@@ -7,7 +7,7 @@ namespace CodeGraphToDgml.Vsix;
 internal sealed class OperationProgressController : IDisposable
 {
     private readonly ToolkitPackage _package;
-    private readonly TraversalProgressForm _form;
+    private IVsThreadedWaitDialog4? _waitDialog;
     private readonly CancellationTokenSource _cancellationTokenSource = new();
     private bool _completed;
     private bool _dialogStarted;
@@ -15,7 +15,6 @@ internal sealed class OperationProgressController : IDisposable
     public OperationProgressController(ToolkitPackage package)
     {
         _package = package;
-        _form = new TraversalProgressForm(_cancellationTokenSource);
         Progress = new Progress<TraversalProgress>(value =>
         {
             var message = $"{value.Stage}: depth {value.Depth}, nodes {value.NodeCount}";
@@ -64,23 +63,7 @@ internal sealed class OperationProgressController : IDisposable
 
         _cancellationTokenSource.Dispose();
 
-        if (!_form.IsDisposed)
-        {
-            try
-            {
-                if (_form.InvokeRequired)
-                {
-                    _form.BeginInvoke(new Action(() => _form.Close()));
-                }
-                else
-                {
-                    _form.Close();
-                }
-            }
-            catch
-            {
-            }
-        }
+        _ = CloseFormAsync();
     }
 
     private async Task UpdateUiAsync(string message, bool ensureVisible)
@@ -89,16 +72,23 @@ internal sealed class OperationProgressController : IDisposable
 
         if (ensureVisible && !_dialogStarted)
         {
-            _dialogStarted = true;
-            if (!_form.IsDisposed)
+            var dialogFactory = await _package.GetServiceAsync(typeof(SVsThreadedWaitDialogFactory)).ConfigureAwait(true) as IVsThreadedWaitDialogFactory;
+            if (dialogFactory != null)
             {
-                _form.Show();
+                dialogFactory.CreateInstance(out var waitDialog);
+                _waitDialog = waitDialog as IVsThreadedWaitDialog4;
+                _waitDialog?.StartWaitDialog("Code Graph to DGML", message, null, null, "Cancelling...", 0, true, true);
             }
+            _dialogStarted = true;
         }
 
-        if (!_form.IsDisposed)
+        if (_waitDialog != null)
         {
-            _form.UpdateMessage(message);
+            _waitDialog.UpdateProgress(message, null, null, 0, 0, false, out var isCancelled);
+            if (isCancelled && !_cancellationTokenSource.IsCancellationRequested)
+            {
+                _cancellationTokenSource.Cancel();
+            }
         }
 
         var statusBar = await _package.GetServiceAsync(typeof(SVsStatusbar)).ConfigureAwait(true) as IVsStatusbar;
@@ -109,9 +99,10 @@ internal sealed class OperationProgressController : IDisposable
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
-        if (!_form.IsDisposed)
+        if (_waitDialog != null)
         {
-            _form.Close();
+            _waitDialog.EndWaitDialog(out _);
+            _waitDialog = null;
         }
     }
 }
