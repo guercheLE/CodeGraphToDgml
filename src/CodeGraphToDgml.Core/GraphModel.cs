@@ -76,48 +76,51 @@ public sealed class TraversalGraph
 
     public void FlattenSingleChildNamespaces()
     {
-        bool changed;
-        do
+        while (TryFlattenSingleNamespace())
         {
-            changed = false;
-            foreach (var node in _nodes.Values.ToList())
+        }
+    }
+
+    private bool TryFlattenSingleNamespace()
+    {
+        foreach (var node in _nodes.Values)
+        {
+            if (node.Kind != "CodeSchema_Namespace")
             {
-                if (node.Kind != "CodeSchema_Namespace")
-                {
-                    continue;
-                }
-
-                var childLinks = _links
-                    .Where(l => l.SourceId == node.Id && l.Category == "Contains")
-                    .ToList();
-
-                if (childLinks.Count != 1)
-                {
-                    continue;
-                }
-
-                var onlyChildId = childLinks[0].TargetId;
-                if (!_nodes.TryGetValue(onlyChildId, out var childNode)
-                    || childNode.Kind != "CodeSchema_Namespace")
-                {
-                    continue;
-                }
-
-                var incomingLinks = _links
-                    .Where(l => l.TargetId == node.Id)
-                    .ToList();
-
-                foreach (var incoming in incomingLinks)
-                {
-                    _links.Remove(incoming);
-                    _links.Add(new GraphLink(incoming.SourceId, onlyChildId, incoming.Category));
-                }
-
-                _links.Remove(childLinks[0]);
-                _nodes.Remove(node.Id);
-                changed = true;
-                break;
+                continue;
             }
-        } while (changed);
+
+            var childLinks = _links
+                .Where(l => l.SourceId == node.Id && l.Category == "Contains")
+                .ToList();
+
+            if (childLinks.Count != 1)
+            {
+                continue;
+            }
+
+            var onlyChildId = childLinks[0].TargetId;
+            if (!_nodes.TryGetValue(onlyChildId, out var childNode)
+                || childNode.Kind != "CodeSchema_Namespace")
+            {
+                continue;
+            }
+
+            var incomingLinks = _links
+                .Where(l => l.TargetId == node.Id)
+                .ToList();
+
+            foreach (var incoming in incomingLinks)
+            {
+                _links.Remove(incoming);
+                _links.Add(new GraphLink(incoming.SourceId, onlyChildId, incoming.Category));
+            }
+
+            _links.Remove(childLinks[0]);
+            _nodes.Remove(node.Id);
+            return true;
+        }
+
+        return false;
     }
 }

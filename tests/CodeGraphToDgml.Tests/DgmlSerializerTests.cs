@@ -12,7 +12,8 @@ public sealed class DgmlSerializerTests
     [TestMethod]
     public void CreateEmptyText_CreatesStandaloneTopToBottomDocument()
     {
-        var text = DgmlSerializer.CreateEmptyText();
+        var serializer = new DgmlSerializer();
+        var text = serializer.CreateEmptyText();
         var document = XDocument.Parse(text, LoadOptions.PreserveWhitespace);
 
         Assert.AreEqual("utf-8", document.Declaration?.Encoding);
@@ -160,7 +161,8 @@ public sealed class DgmlSerializerTests
     [TestMethod]
     public void CreateEmptyText_ContainsUsedByLinkStyle()
     {
-        var text = DgmlSerializer.CreateEmptyText();
+        var serializer = new DgmlSerializer();
+        var text = serializer.CreateEmptyText();
         var document = XDocument.Parse(text, LoadOptions.PreserveWhitespace);
 
         var usedByStyle = document.Root!

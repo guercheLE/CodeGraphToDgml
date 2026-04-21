@@ -41,6 +41,9 @@ internal sealed class RoslynReferencesProvider
             return null;
         }
 
+        int activeLine = selection.ActivePoint.Line;
+        int activeColumn = selection.ActivePoint.LineCharOffset;
+
         var workspace = await RoslynGraphHelpers.GetWorkspaceAsync(_package, cancellationToken).ConfigureAwait(true);
         if (workspace is null)
         {
@@ -53,7 +56,7 @@ internal sealed class RoslynReferencesProvider
             return null;
         }
 
-        var position = await RoslynGraphHelpers.GetPositionFromSelectionAsync(document, selection, cancellationToken).ConfigureAwait(false);
+        var position = await RoslynGraphHelpers.GetPositionFromLinesAsync(document, activeLine, activeColumn, cancellationToken).ConfigureAwait(false);
 
         await _logger.WriteLineAsync($"[ResolveReferencesSubject] Position={position}, File={activeDocument.FullName}").ConfigureAwait(false);
 

@@ -296,9 +296,10 @@ internal static class RoslynGraphHelpers
         return null;
     }
 
-    internal static async Task<int> GetPositionFromSelectionAsync(
+    internal static async Task<int> GetPositionFromLinesAsync(
         RoslynDocument document,
-        TextSelection selection,
+        int activeLine,
+        int activeColumn,
         CancellationToken cancellationToken)
     {
         var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
@@ -307,11 +308,11 @@ internal static class RoslynGraphHelpers
             return 0;
         }
 
-        var requestedLineIndex = Math.Max(0, selection.ActivePoint.Line - 1);
+        var requestedLineIndex = Math.Max(0, activeLine - 1);
         var lineIndex = Math.Min(requestedLineIndex, text.Lines.Count - 1);
         var line = text.Lines[lineIndex];
 
-        var requestedColumnIndex = Math.Max(0, selection.ActivePoint.LineCharOffset - 1);
+        var requestedColumnIndex = Math.Max(0, activeColumn - 1);
         var maxColumnIndex = line.End - line.Start;
         var columnIndex = Math.Min(requestedColumnIndex, maxColumnIndex);
 

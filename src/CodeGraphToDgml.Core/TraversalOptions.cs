@@ -1,6 +1,6 @@
 namespace CodeGraphToDgml.Core;
 
-public sealed class TraversalOptions
+public sealed record TraversalOptions
 {
     public int MaxDepth { get; init; } = 16;
 
@@ -22,17 +22,11 @@ public sealed class TraversalOptions
 
     public TraversalOptions Normalize()
     {
-        return new TraversalOptions
+        return this with
         {
             MaxDepth = MaxDepth < 1 ? 1 : MaxDepth,
             MaxNodeCount = MaxNodeCount < 1 ? 1 : MaxNodeCount,
-            IncludeProperties = IncludeProperties,
-            IncludeEvents = IncludeEvents,
-            IncludeExternalSymbols = IncludeExternalSymbols,
-            IncludeGeneratedCode = IncludeGeneratedCode,
-            IncludeComponentHosts = IncludeComponentHosts,
-            MaxHostDepth = MaxHostDepth < 1 ? 1 : MaxHostDepth,
-            CollapseGroups = CollapseGroups,
+            MaxHostDepth = MaxHostDepth < 1 ? 1 : MaxHostDepth
         };
     }
 }

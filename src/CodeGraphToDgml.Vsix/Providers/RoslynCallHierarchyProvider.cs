@@ -57,6 +57,9 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             return null;
         }
 
+        int activeLine = selection.ActivePoint.Line;
+        int activeColumn = selection.ActivePoint.LineCharOffset;
+
         var workspace = await GetWorkspaceAsync(cancellationToken).ConfigureAwait(true);
         if (workspace is null)
         {
@@ -69,7 +72,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             return null;
         }
 
-        var position = await GetPositionFromSelectionAsync(document, selection, cancellationToken).ConfigureAwait(false);
+        var position = await RoslynGraphHelpers.GetPositionFromLinesAsync(document, activeLine, activeColumn, cancellationToken).ConfigureAwait(false);
 
         await _logger.WriteLineAsync($"[ResolveSubject] Position={position}, File={activeDocument.FullName}").ConfigureAwait(false);
 
@@ -596,29 +599,6 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             cancellationToken).ConfigureAwait(false);
 
         return symbol;
-    }
-
-    private static async Task<int> GetPositionFromSelectionAsync(
-        RoslynDocument document,
-        TextSelection selection,
-        CancellationToken cancellationToken)
-    {
-        var text = await document.GetTextAsync(cancellationToken).ConfigureAwait(false);
-        if (text.Lines.Count == 0)
-        {
-            return 0;
-        }
-
-        // DTE line/column are 1-based; Roslyn offsets are 0-based.
-        var requestedLineIndex = Math.Max(0, selection.ActivePoint.Line - 1);
-        var lineIndex = Math.Min(requestedLineIndex, text.Lines.Count - 1);
-        var line = text.Lines[lineIndex];
-
-        var requestedColumnIndex = Math.Max(0, selection.ActivePoint.LineCharOffset - 1);
-        var maxColumnIndex = line.End - line.Start;
-        var columnIndex = Math.Min(requestedColumnIndex, maxColumnIndex);
-
-        return line.Start + columnIndex;
     }
 
     private static RoslynDocument? GetDocument(RoslynSolution solution, string filePath)

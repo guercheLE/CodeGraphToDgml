@@ -7,9 +7,253 @@ using System.Xml.Linq;
 
 namespace CodeGraphToDgml.Core;
 
+public interface IDgmlSchemaProvider
+{
+    IEnumerable<CategoryDefinition> GetCategories();
+    IEnumerable<PropertyDefinition> GetProperties();
+    IEnumerable<XElement> GetStyles(XNamespace xmlNamespace);
+}
+
+public sealed class DefaultDgmlSchemaProvider : IDgmlSchemaProvider
+{
+    public IEnumerable<CategoryDefinition> GetCategories()
+    {
+        yield return new CategoryDefinition("CodeSchema_Assembly", "Assembly",
+            Icon: "CodeSchema_Assembly",
+            DefaultAction: "Microsoft.Contains",
+            CanBeDataDriven: true,
+            NavigationActionLabel: "Assemblies");
+
+        yield return new CategoryDefinition("CodeSchema_Namespace", "Namespace",
+            Icon: "CodeSchema_Namespace",
+            DefaultAction: "Node:Both:CodeSchema_Type",
+            CanBeDataDriven: true,
+            NavigationActionLabel: "Namespaces");
+
+        yield return new CategoryDefinition("CodeSchema_Class", "Class",
+            BasedOn: "CodeSchema_Type",
+            Icon: "CodeSchema_Class",
+            DefaultAction: "Node:Both:CodeSchema_Member",
+            CanBeDataDriven: true,
+            NavigationActionLabel: "Classes");
+
+        yield return new CategoryDefinition("CodeSchema_Interface", "Interface",
+            BasedOn: "CodeSchema_Type",
+            Icon: "CodeSchema_Interface",
+            DefaultAction: "Node:Both:CodeSchema_Member",
+            CanBeDataDriven: true,
+            NavigationActionLabel: "Interfaces");
+
+        yield return new CategoryDefinition("CodeSchema_Struct", "Struct",
+            BasedOn: "CodeSchema_Type",
+            Icon: "CodeSchema_Struct",
+            DefaultAction: "Node:Both:CodeSchema_Member",
+            CanBeDataDriven: true,
+            NavigationActionLabel: "Structs");
+
+        yield return new CategoryDefinition("CodeSchema_Enum", "Enum",
+            BasedOn: "CodeSchema_Type",
+            Icon: "CodeSchema_Enum",
+            DefaultAction: "Node:Both:CodeSchema_Member",
+            CanBeDataDriven: true,
+            NavigationActionLabel: "Enums");
+
+        yield return new CategoryDefinition("CodeSchema_Delegate", "Delegate",
+            BasedOn: "CodeSchema_Type",
+            Icon: "CodeSchema_Delegate",
+            CanBeDataDriven: true,
+            NavigationActionLabel: "Delegates");
+
+        yield return new CategoryDefinition("CodeSchema_Type", "Type",
+            Icon: "CodeSchema_Class",
+            DefaultAction: "Node:Both:CodeSchema_Member",
+            CanBeDataDriven: true,
+            NavigationActionLabel: "Types");
+
+        yield return new CategoryDefinition("CodeSchema_Method", "Method",
+            Icon: "CodeSchema_Method",
+            CanBeDataDriven: true);
+
+        yield return new CategoryDefinition("CodeSchema_Property", "Property",
+            Icon: "CodeSchema_Property",
+            CanBeDataDriven: true);
+
+        yield return new CategoryDefinition("CodeSchema_Event", "Event",
+            Icon: "CodeSchema_Event",
+            CanBeDataDriven: true);
+
+        yield return new CategoryDefinition("CodeSchema_Field", "Field",
+            Icon: "CodeSchema_Field",
+            CanBeDataDriven: true);
+
+        yield return new CategoryDefinition("CodeSchema_Calls", "Calls",
+            CanBeDataDriven: true,
+            CanLinkedNodesBeDataDriven: true,
+            IncomingActionLabel: "Called By",
+            OutgoingActionLabel: "Calls");
+
+        yield return new CategoryDefinition("CodeSchema_FunctionPointer", "Function Pointer",
+            CanBeDataDriven: true,
+            CanLinkedNodesBeDataDriven: true,
+            IncomingActionLabel: "Called By",
+            OutgoingActionLabel: "Calls");
+
+        yield return new CategoryDefinition("Implements", "Implements",
+            CanBeDataDriven: true,
+            CanLinkedNodesBeDataDriven: true,
+            IncomingActionLabel: "Implemented By",
+            OutgoingActionLabel: "Implements");
+
+        yield return new CategoryDefinition("Contains", "Contains",
+            Description: "Whether the source of the link contains the target object",
+            CanBeDataDriven: false,
+            CanLinkedNodesBeDataDriven: true,
+            IncomingActionLabel: "Contained By",
+            OutgoingActionLabel: "Contains",
+            IsContainment: true);
+
+        yield return new CategoryDefinition("References", "References",
+            CanBeDataDriven: true,
+            CanLinkedNodesBeDataDriven: true,
+            IncomingActionLabel: "Referenced By",
+            OutgoingActionLabel: "References");
+
+        yield return new CategoryDefinition("InheritsFrom", "Inherits From",
+            CanBeDataDriven: true,
+            CanLinkedNodesBeDataDriven: true,
+            IncomingActionLabel: "Inherited By",
+            OutgoingActionLabel: "Inherits From");
+
+        yield return new CategoryDefinition("UsedBy", "Used By",
+            CanBeDataDriven: true,
+            CanLinkedNodesBeDataDriven: true,
+            IncomingActionLabel: "Used By",
+            OutgoingActionLabel: "Uses");
+
+        yield return new CategoryDefinition("Externals", "Externals",
+            CanBeDataDriven: true);
+    }
+
+    public IEnumerable<PropertyDefinition> GetProperties()
+    {
+        yield return new PropertyDefinition("FilePath", "File Path", "File Path");
+        yield return new PropertyDefinition("Line", "Line", "Source line number", "System.Int32");
+        yield return new PropertyDefinition("Group", "Group",
+            "Display the node as a group",
+            "Microsoft.VisualStudio.GraphModel.GraphGroupStyle");
+        yield return new PropertyDefinition("Icon", "Icon", "Icon");
+        yield return new PropertyDefinition("Label", "Label",
+            "Displayable label of an Annotatable object");
+        yield return new PropertyDefinition("GraphDirection", "Graph Direction",
+            "Graph layout direction");
+        yield return new PropertyDefinition("IsContainment",
+            DataType: "System.Boolean");
+        yield return new PropertyDefinition("CanBeDataDriven", "CanBeDataDriven",
+            "CanBeDataDriven", "System.Boolean");
+        yield return new PropertyDefinition("CanLinkedNodesBeDataDriven", "CanLinkedNodesBeDataDriven",
+            "CanLinkedNodesBeDataDriven", "System.Boolean");
+        yield return new PropertyDefinition("IncomingActionLabel", "IncomingActionLabel",
+            "IncomingActionLabel");
+        yield return new PropertyDefinition("OutgoingActionLabel", "OutgoingActionLabel",
+            "OutgoingActionLabel");
+        yield return new PropertyDefinition("DefaultAction", "DefaultAction",
+            "DefaultAction");
+        yield return new PropertyDefinition("NavigationActionLabel", "NavigationActionLabel",
+            "NavigationActionLabel");
+        yield return new PropertyDefinition("Stroke", "Stroke",
+            "Stroke");
+        yield return new PropertyDefinition("StrokeDashArray", "Stroke Dash Array",
+            "Stroke Dash Array");
+        yield return new PropertyDefinition("DrawArrow", "Draw Arrow",
+            "Draw Arrow", "System.Boolean");
+        yield return new PropertyDefinition("DataVirtualized", "Data Virtualized",
+            "Indicates whether the graph data is virtualized", "System.Boolean");
+        yield return new PropertyDefinition("LayoutSettings", "Layout Settings",
+            "Layout Settings");
+        yield return new PropertyDefinition("Visibility", "Visibility",
+            "Visibility",
+            "System.Windows.Visibility");
+    }
+
+    public IEnumerable<XElement> GetStyles(XNamespace xmlNamespace)
+    {
+        yield return CreateNodeStyle(xmlNamespace, "Assembly", "HasCategory('CodeSchema_Assembly')", "#FF094167", "#FFFFFFFF", stroke: "#FF094167", icon: "CodeSchema_Assembly");
+        yield return CreateNodeStyle(xmlNamespace, "Namespace", "HasCategory('CodeSchema_Namespace')", "#FF0E619A", "#FFFFFFFF", stroke: "#FF0E619A", icon: "CodeSchema_Namespace");
+        yield return CreateNodeStyle(xmlNamespace, "Interface", "HasCategory('CodeSchema_Interface')", "#FF1382CE", "#FFFFFFFF", stroke: "#FF1382CE", icon: "CodeSchema_Interface");
+        yield return CreateNodeStyle(xmlNamespace, "Struct", "HasCategory('CodeSchema_Struct')", "#FF1382CE", "#FFFFFFFF", stroke: "#FF1382CE", icon: "CodeSchema_Struct");
+        yield return CreateNodeStyle(xmlNamespace, "Enumeration", "HasCategory('CodeSchema_Enum')", "#FF1382CE", "#FFFFFFFF", stroke: "#FF1382CE", icon: "CodeSchema_Enum");
+        yield return CreateNodeStyle(xmlNamespace, "Delegate", "HasCategory('CodeSchema_Delegate')", "#FF1382CE", "#FFFFFFFF", stroke: "#FF1382CE", icon: "CodeSchema_Delegate");
+        yield return CreateNodeStyle(xmlNamespace, "Class", "HasCategory('CodeSchema_Type')", "#FF1382CE", "#FFFFFFFF", stroke: "#FF1382CE", icon: "CodeSchema_Class");
+        yield return CreateNodeStyle(xmlNamespace, "Property", "HasCategory('CodeSchema_Property')", "#FFE0E0E0", "#FF1E1E1E", stroke: "#FFE0E0E0", icon: "CodeSchema_Property");
+        yield return CreateNodeStyle(xmlNamespace, "Method", "HasCategory('CodeSchema_Method') Or HasCategory('CodeSchema_CallStackUnresolvedMethod')", "#FFE0E0E0", "#FF1E1E1E", stroke: "#FFE0E0E0", icon: "CodeSchema_Method");
+        yield return CreateNodeStyle(xmlNamespace, "Event", "HasCategory('CodeSchema_Event')", "#FFE0E0E0", "#FF1E1E1E", stroke: "#FFE0E0E0", icon: "CodeSchema_Event");
+        yield return CreateNodeStyle(xmlNamespace, "Field", "HasCategory('CodeSchema_Field')", "#FFE0E0E0", "#FF1E1E1E", stroke: "#FFE0E0E0", icon: "CodeSchema_Field");
+        yield return CreateNodeStyle(xmlNamespace, "Externals", "HasCategory('Externals')", "#FF424242", "#FFFFFFFF", stroke: "#FF424242");
+        yield return CreateLinkStyle(xmlNamespace, "Inherits From", "HasCategory('InheritsFrom')", "#FF00A600", "2 0", drawArrow: true);
+        yield return CreateLinkStyle(xmlNamespace, "Implements", "HasCategory('Implements')", "#8000A600", "2 2", drawArrow: true);
+        yield return CreateLinkStyle(xmlNamespace, "Calls", "HasCategory('CodeSchema_Calls')", "#FFFF00FF", "2 0", drawArrow: true);
+        yield return CreateLinkStyle(xmlNamespace, "Function Pointer", "HasCategory('CodeSchema_FunctionPointer')", "#FFFF00FF", "2 2", drawArrow: true);
+        yield return CreateLinkStyle(xmlNamespace, "Contains", "HasCategory('Contains')", "#FF808080", "2 0", drawArrow: false);
+        yield return CreateLinkStyle(xmlNamespace, "References", "HasCategory('References')", "#FF4488FF", "2 2", drawArrow: true);
+        yield return CreateLinkStyle(xmlNamespace, "Used By", "HasCategory('UsedBy')", "#FFFF8C00", "2 0", drawArrow: true);
+    }
+
+    private static XElement CreateNodeStyle(
+        XNamespace ns,
+        string groupLabel, string expression,
+        string background, string foreground,
+        string? stroke = null,
+        string? icon = null)
+    {
+        var style = new XElement(ns + "Style",
+            new XAttribute("TargetType", "Node"),
+            new XAttribute("GroupLabel", groupLabel),
+            new XAttribute("ValueLabel", "Has category"),
+            new XElement(ns + "Condition", new XAttribute("Expression", expression)),
+            new XElement(ns + "Setter", new XAttribute("Property", "Background"), new XAttribute("Value", background)),
+            new XElement(ns + "Setter", new XAttribute("Property", "Foreground"), new XAttribute("Value", foreground)));
+
+        if (stroke is not null)
+        {
+            style.Add(new XElement(ns + "Setter",
+                new XAttribute("Property", "Stroke"), new XAttribute("Value", stroke)));
+        }
+
+        if (icon is not null)
+        {
+            style.Add(new XElement(ns + "Setter",
+                new XAttribute("Property", "Icon"), new XAttribute("Value", icon)));
+        }
+
+        return style;
+    }
+
+    private static XElement CreateLinkStyle(
+        XNamespace ns,
+        string groupLabel, string expression,
+        string stroke, string strokeDashArray,
+        bool drawArrow)
+    {
+        return new XElement(ns + "Style",
+            new XAttribute("TargetType", "Link"),
+            new XAttribute("GroupLabel", groupLabel),
+            new XAttribute("ValueLabel", "True"),
+            new XElement(ns + "Condition", new XAttribute("Expression", expression)),
+            new XElement(ns + "Setter", new XAttribute("Property", "Stroke"), new XAttribute("Value", stroke)),
+            new XElement(ns + "Setter", new XAttribute("Property", "StrokeDashArray"), new XAttribute("Value", strokeDashArray)),
+            new XElement(ns + "Setter", new XAttribute("Property", "DrawArrow"), new XAttribute("Value", drawArrow ? "true" : "false")));
+    }
+}
+
 public sealed class DgmlSerializer
 {
     private static readonly XNamespace Namespace = "http://schemas.microsoft.com/vs/2009/dgml";
+    private readonly IDgmlSchemaProvider _schemaProvider;
+
+    public DgmlSerializer(IDgmlSchemaProvider? schemaProvider = null)
+    {
+        _schemaProvider = schemaProvider ?? new DefaultDgmlSchemaProvider();
+    }
 
     public string Merge(string? existingDgml, TraversalGraph graph, bool replaceContents, bool collapseGroups = false)
     {
@@ -55,7 +299,7 @@ public sealed class DgmlSerializer
                 new XAttribute("Label", node.Label),
                 new XAttribute("Category", node.Kind));
 
-            if (node.Kind is "CodeSchema_Assembly" or "CodeSchema_Namespace" or "CodeSchema_Class" or "CodeSchema_Interface" or "CodeSchema_Struct" or "CodeSchema_Enum" or "CodeSchema_Delegate")
+            if (IsContainerKind(node.Kind))
             {
                 nodeElement.SetAttributeValue("Group", collapseGroups ? "Collapsed" : "Expanded");
             }
@@ -97,12 +341,12 @@ public sealed class DgmlSerializer
         return Serialize(document);
     }
 
-    public static string CreateEmptyText()
+    public string CreateEmptyText()
     {
         return Serialize(CreateEmptyDocument());
     }
 
-    private static XDocument CreateEmptyDocument()
+    private XDocument CreateEmptyDocument()
     {
         return new XDocument(
             new XDeclaration("1.0", "utf-8", "yes"),
@@ -115,93 +359,14 @@ public sealed class DgmlSerializer
                 CreateStylesElement()));
     }
 
-    private static XElement CreateStylesElement()
+    private XElement CreateStylesElement()
     {
-        return new XElement(Namespace + "Styles",
-            // --- Node styles ---
-            CreateNodeStyle("Assembly", "HasCategory('CodeSchema_Assembly')",
-                "#FF094167", "#FFFFFFFF", stroke: "#FF094167", icon: "CodeSchema_Assembly"),
-            CreateNodeStyle("Namespace", "HasCategory('CodeSchema_Namespace')",
-                "#FF0E619A", "#FFFFFFFF", stroke: "#FF0E619A", icon: "CodeSchema_Namespace"),
-            CreateNodeStyle("Interface", "HasCategory('CodeSchema_Interface')",
-                "#FF1382CE", "#FFFFFFFF", stroke: "#FF1382CE", icon: "CodeSchema_Interface"),
-            CreateNodeStyle("Struct", "HasCategory('CodeSchema_Struct')",
-                "#FF1382CE", "#FFFFFFFF", stroke: "#FF1382CE", icon: "CodeSchema_Struct"),
-            CreateNodeStyle("Enumeration", "HasCategory('CodeSchema_Enum')",
-                "#FF1382CE", "#FFFFFFFF", stroke: "#FF1382CE", icon: "CodeSchema_Enum"),
-            CreateNodeStyle("Delegate", "HasCategory('CodeSchema_Delegate')",
-                "#FF1382CE", "#FFFFFFFF", stroke: "#FF1382CE", icon: "CodeSchema_Delegate"),
-            CreateNodeStyle("Class", "HasCategory('CodeSchema_Type')",
-                "#FF1382CE", "#FFFFFFFF", stroke: "#FF1382CE", icon: "CodeSchema_Class"),
-            CreateNodeStyle("Property", "HasCategory('CodeSchema_Property')",
-                "#FFE0E0E0", "#FF1E1E1E", stroke: "#FFE0E0E0", icon: "CodeSchema_Property"),
-            CreateNodeStyle("Method", "HasCategory('CodeSchema_Method') Or HasCategory('CodeSchema_CallStackUnresolvedMethod')",
-                "#FFE0E0E0", "#FF1E1E1E", stroke: "#FFE0E0E0", icon: "CodeSchema_Method"),
-            CreateNodeStyle("Event", "HasCategory('CodeSchema_Event')",
-                "#FFE0E0E0", "#FF1E1E1E", stroke: "#FFE0E0E0", icon: "CodeSchema_Event"),
-            CreateNodeStyle("Field", "HasCategory('CodeSchema_Field')",
-                "#FFE0E0E0", "#FF1E1E1E", stroke: "#FFE0E0E0", icon: "CodeSchema_Field"),
-            CreateNodeStyle("Externals", "HasCategory('Externals')",
-                "#FF424242", "#FFFFFFFF", stroke: "#FF424242"),
-            // --- Link styles ---
-            CreateLinkStyle("Inherits From", "HasCategory('InheritsFrom')",
-                "#FF00A600", "2 0", drawArrow: true),
-            CreateLinkStyle("Implements", "HasCategory('Implements')",
-                "#8000A600", "2 2", drawArrow: true),
-            CreateLinkStyle("Calls", "HasCategory('CodeSchema_Calls')",
-                "#FFFF00FF", "2 0", drawArrow: true),
-            CreateLinkStyle("Function Pointer", "HasCategory('CodeSchema_FunctionPointer')",
-                "#FFFF00FF", "2 2", drawArrow: true),
-            CreateLinkStyle("Contains", "HasCategory('Contains')",
-                "#FF808080", "2 0", drawArrow: false),
-            CreateLinkStyle("References", "HasCategory('References')",
-                "#FF4488FF", "2 2", drawArrow: true),
-            CreateLinkStyle("Used By", "HasCategory('UsedBy')",
-                "#FFFF8C00", "2 0", drawArrow: true));
-    }
-
-    private static XElement CreateNodeStyle(
-        string groupLabel, string expression,
-        string background, string foreground,
-        string? stroke = null,
-        string? icon = null)
-    {
-        var style = new XElement(Namespace + "Style",
-            new XAttribute("TargetType", "Node"),
-            new XAttribute("GroupLabel", groupLabel),
-            new XAttribute("ValueLabel", "Has category"),
-            new XElement(Namespace + "Condition", new XAttribute("Expression", expression)),
-            new XElement(Namespace + "Setter", new XAttribute("Property", "Background"), new XAttribute("Value", background)),
-            new XElement(Namespace + "Setter", new XAttribute("Property", "Foreground"), new XAttribute("Value", foreground)));
-
-        if (stroke is not null)
+        var element = new XElement(Namespace + "Styles");
+        foreach (var style in _schemaProvider.GetStyles(Namespace))
         {
-            style.Add(new XElement(Namespace + "Setter",
-                new XAttribute("Property", "Stroke"), new XAttribute("Value", stroke)));
+            element.Add(style);
         }
-
-        if (icon is not null)
-        {
-            style.Add(new XElement(Namespace + "Setter",
-                new XAttribute("Property", "Icon"), new XAttribute("Value", icon)));
-        }
-
-        return style;
-    }
-
-    private static XElement CreateLinkStyle(
-        string groupLabel, string expression,
-        string stroke, string strokeDashArray,
-        bool drawArrow)
-    {
-        return new XElement(Namespace + "Style",
-            new XAttribute("TargetType", "Link"),
-            new XAttribute("GroupLabel", groupLabel),
-            new XAttribute("ValueLabel", "True"),
-            new XElement(Namespace + "Condition", new XAttribute("Expression", expression)),
-            new XElement(Namespace + "Setter", new XAttribute("Property", "Stroke"), new XAttribute("Value", stroke)),
-            new XElement(Namespace + "Setter", new XAttribute("Property", "StrokeDashArray"), new XAttribute("Value", strokeDashArray)),
-            new XElement(Namespace + "Setter", new XAttribute("Property", "DrawArrow"), new XAttribute("Value", drawArrow ? "true" : "false")));
+        return element;
     }
 
     private static XElement EnsureRoot(XDocument document)
@@ -230,7 +395,7 @@ public sealed class DgmlSerializer
         return child;
     }
 
-    private static void EnsureCategories(XElement categoriesElement)
+    private void EnsureCategories(XElement categoriesElement)
     {
         var existing = new HashSet<string>(
             categoriesElement.Elements(Namespace + "Category")
@@ -239,7 +404,7 @@ public sealed class DgmlSerializer
                 .Cast<string>(),
             StringComparer.Ordinal);
 
-        foreach (var category in GetCategoryDefinitions())
+        foreach (var category in _schemaProvider.GetCategories())
         {
             if (existing.Add(category.Id))
             {
@@ -254,31 +419,21 @@ public sealed class DgmlSerializer
             new XAttribute("Id", category.Id),
             new XAttribute("Label", category.Label));
 
-        if (category.BasedOn is not null)
-            element.SetAttributeValue("BasedOn", category.BasedOn);
-        if (category.CanBeDataDriven.HasValue)
-            element.SetAttributeValue("CanBeDataDriven", category.CanBeDataDriven.Value ? "True" : "False");
-        if (category.CanLinkedNodesBeDataDriven.HasValue)
-            element.SetAttributeValue("CanLinkedNodesBeDataDriven", category.CanLinkedNodesBeDataDriven.Value ? "True" : "False");
-        if (category.DefaultAction is not null)
-            element.SetAttributeValue("DefaultAction", category.DefaultAction);
-        if (category.Description is not null)
-            element.SetAttributeValue("Description", category.Description);
-        if (category.Icon is not null)
-            element.SetAttributeValue("Icon", category.Icon);
-        if (category.IncomingActionLabel is not null)
-            element.SetAttributeValue("IncomingActionLabel", category.IncomingActionLabel);
-        if (category.IsContainment.HasValue)
-            element.SetAttributeValue("IsContainment", category.IsContainment.Value ? "True" : "False");
-        if (category.NavigationActionLabel is not null)
-            element.SetAttributeValue("NavigationActionLabel", category.NavigationActionLabel);
-        if (category.OutgoingActionLabel is not null)
-            element.SetAttributeValue("OutgoingActionLabel", category.OutgoingActionLabel);
+        SetAttributeIfNotNull(element, "BasedOn", category.BasedOn);
+        SetAttributeIfHasValue(element, "CanBeDataDriven", category.CanBeDataDriven);
+        SetAttributeIfHasValue(element, "CanLinkedNodesBeDataDriven", category.CanLinkedNodesBeDataDriven);
+        SetAttributeIfNotNull(element, "DefaultAction", category.DefaultAction);
+        SetAttributeIfNotNull(element, "Description", category.Description);
+        SetAttributeIfNotNull(element, "Icon", category.Icon);
+        SetAttributeIfNotNull(element, "IncomingActionLabel", category.IncomingActionLabel);
+        SetAttributeIfHasValue(element, "IsContainment", category.IsContainment);
+        SetAttributeIfNotNull(element, "NavigationActionLabel", category.NavigationActionLabel);
+        SetAttributeIfNotNull(element, "OutgoingActionLabel", category.OutgoingActionLabel);
 
         return element;
     }
 
-    private static void EnsureProperties(XElement propertiesElement)
+    private void EnsureProperties(XElement propertiesElement)
     {
         var existing = new HashSet<string>(
             propertiesElement.Elements(Namespace + "Property")
@@ -287,7 +442,7 @@ public sealed class DgmlSerializer
                 .Cast<string>(),
             StringComparer.Ordinal);
 
-        foreach (var property in GetPropertyDefinitions())
+        foreach (var property in _schemaProvider.GetProperties())
         {
             if (existing.Add(property.Id))
             {
@@ -295,24 +450,22 @@ public sealed class DgmlSerializer
                     new XAttribute("Id", property.Id),
                     new XAttribute("DataType", property.DataType));
 
-                if (property.Label is not null)
-                    element.SetAttributeValue("Label", property.Label);
-                if (property.Description is not null)
-                    element.SetAttributeValue("Description", property.Description);
+                SetAttributeIfNotNull(element, "Label", property.Label);
+                SetAttributeIfNotNull(element, "Description", property.Description);
 
                 propertiesElement.Add(element);
             }
         }
     }
 
-    private static XElement CreateCategoriesElement()
+    private XElement CreateCategoriesElement()
     {
         var element = new XElement(Namespace + "Categories");
         EnsureCategories(element);
         return element;
     }
 
-    private static XElement CreatePropertiesElement()
+    private XElement CreatePropertiesElement()
     {
         var element = new XElement(Namespace + "Properties");
         EnsureProperties(element);
@@ -491,6 +644,12 @@ public sealed class DgmlSerializer
         return string.Concat(sourceId, "->", targetId, ":", category);
     }
 
+    private static bool IsContainerKind(string kind)
+    {
+        return kind is "CodeSchema_Assembly" or "CodeSchema_Namespace" or "CodeSchema_Class"
+            or "CodeSchema_Interface" or "CodeSchema_Struct" or "CodeSchema_Enum" or "CodeSchema_Delegate";
+    }
+
     private static string Serialize(XDocument document)
     {
         using var stream = new MemoryStream();
@@ -508,5 +667,21 @@ public sealed class DgmlSerializer
         }
 
         return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void SetAttributeIfNotNull(XElement element, string name, string? value)
+    {
+        if (value is not null)
+        {
+            element.SetAttributeValue(name, value);
+        }
+    }
+
+    private static void SetAttributeIfHasValue(XElement element, string name, bool? value)
+    {
+        if (value.HasValue)
+        {
+            element.SetAttributeValue(name, value.Value ? "True" : "False");
+        }
     }
 }
