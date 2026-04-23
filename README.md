@@ -12,11 +12,19 @@ Code Graph to DGML is a Visual Studio extension that builds DGML graphs from the
 - discovers forms, pages, and windows that host UI components (WinForms, WebForms, WPF, Blazor, MAUI, Avalonia) and adds them with UsedBy links
 - follows nested component hosting up to a configurable depth
 
+### Traverse Down to DGML
+
+- traverses callees downward from C# and Visual Basic methods, properties, and events
+- follows interface implementations and overridden base members so the graph reflects the methods that may actually run at each call site
+- limits traversal by maximum depth and node count
+- filters properties, events, external symbols, and generated code
+
 ### All References to DGML
 
-- builds a type-reference graph from a C# or Visual Basic class, struct, interface, or record
-- discovers derived classes, interface implementations, base types, and implemented interfaces
-- traverses the reference chain up to the configured maximum depth
+- mirrors Visual Studio's built-in `Find All References` (Shift+F12) for the symbol at the caret
+- supports C# and Visual Basic types (class, struct, interface, record) and members (methods, properties, events, fields)
+- adds a `References` link from each enclosing referrer (method, property, event, field, or type) to the target symbol
+- limits traversal by maximum depth and node count and respects the external symbol and generated code filters
 
 ### Common
 
@@ -74,13 +82,21 @@ The generated VSIX is written to `src\CodeGraphToDgml.Vsix\bin\Release\net48\Cod
 | Progress and cancel | Start a traversal large enough to observe progress, then cancel | Status bar updates are shown and cancellation stops the operation cleanly |
 | Output logging | Run traversal with `Show detailed output` enabled | Output pane shows resolved symbol, counts, target document, and errors when applicable |
 | Packaging | Build Release and inspect the output folder | A VSIX is produced and can be installed into a VS 2022 Experimental Instance |
-| **All References** | | |
-| Command visibility | Open a `.cs` or `.vb` file and right-click on a class, struct, interface, or record | `All References to DGML` is visible and enabled |
-| Unsupported caret target | Place caret on a method, property, local variable, or whitespace | Informational message is shown and no traversal runs |
-| Derived classes | Run on a base class that has derived classes | Graph includes derived classes with `InheritsFrom` links |
-| Interface implementations | Run on an interface that has implementations | Graph includes implementing types with `Implements` links |
-| Base types and interfaces | Run on a class that extends a base class and implements interfaces | Graph includes the base type chain and implemented interfaces |
-| Depth limit | Set `Maximum depth` to `1` and run on a type with multi-level inheritance | Only direct references are included |
+| **Traverse Down to DGML** | | |
+| Command visibility | Open a `.cs` or `.vb` file and right-click in the editor | `Traverse Down to DGML` is visible and enabled |
+| Supported symbols | Place caret on a method, property, and event in separate checks | Traversal starts successfully for each supported symbol kind |
+| Direct callees | Run on a method that calls several other methods | Graph includes the called methods with `Calls` links from the starting method |
+| Interface dispatch | Run on a method that invokes an interface member with multiple implementations | Graph includes each implementing member reachable from the call site |
+| Virtual overrides | Run on a method that calls a virtual member | Graph includes the overriding members in derived types |
+| Depth limit | Set `Maximum depth` to `1` and run on a method with multi-level callees | Only direct callees are included |
+| Node limit | Set `Maximum node count` to `1` or `2` and run traversal | Traversal stops when the node cap is reached |
+| **All References to DGML** | | |
+| Command visibility | Open a `.cs` or `.vb` file and right-click on a class, struct, interface, record, method, property, event, or field | `All References to DGML` is visible and enabled |
+| Unsupported caret target | Place caret on whitespace, a namespace, a using/Imports directive, or a local variable | Informational message is shown and no traversal runs |
+| Type references | Run on a type used in several other files | Graph includes each enclosing referrer (method/property/type) with a `References` link to the target type |
+| Member references | Run on a method, property, event, or field used from multiple call sites | Graph includes each enclosing referrer with a `References` link to the target member |
+| Depth limit | Set `Maximum depth` to `1` and run on a symbol with chained referrers | Only direct referrers are included |
+| Filter respect | Toggle `Include external symbols` and `Include generated code` | Result graph respects each option |
 | **Component Hosts** | | |
 | Host discovery | Place caret on a method inside a WinForms/WPF UserControl that is used on a Form, run "Traverse Up to DGML" | Form appears with an orange `UsedBy` link to the UserControl |
 | Nested hosting | UserControl A hosted in UserControl B hosted in a Form, set `Maximum host depth` to `2`+ | All three levels appear with UsedBy chains: Form → B → A |
