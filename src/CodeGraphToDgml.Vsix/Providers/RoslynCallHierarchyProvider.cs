@@ -147,7 +147,11 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var caller = NormalizeSymbol(callerInfo.CallingSymbol);
+                // If the call site lives inside a lambda or local function, walk up to the
+                // enclosing real method/property/event so the graph never contains
+                // anonymous/empty-named nodes. Inner calls of the lambda are linked
+                // directly from the enclosing member.
+                var caller = NormalizeSymbol(UnwrapLambdaContainer(callerInfo.CallingSymbol));
                 if (caller is null || !IsAllowed(caller, normalizedOptions))
                 {
                     continue;
@@ -489,7 +493,35 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
     private static bool IsSupportedCalleeSymbol(ISymbol symbol)
     {
+        // Exclude lambdas, anonymous methods, and local functions. They have empty Name
+        // and a synthesised containing type, which would render as empty-named nodes in
+        // the graph. Their inner invocations are still discovered because the syntax
+        // walker descends through the lambda/local-function body.
+        if (symbol is IMethodSymbol method
+            && (method.MethodKind == MethodKind.AnonymousFunction
+                || method.MethodKind == MethodKind.LocalFunction))
+        {
+            return false;
+        }
+
         return symbol.Kind is SymbolKind.Method or SymbolKind.Property or SymbolKind.Event;
+    }
+
+    /// <summary>
+    /// If <paramref name="symbol"/> is a lambda, anonymous method, or local function,
+    /// walks up the containing-symbol chain until a real (non-lambda) symbol is found.
+    /// Used when an upward-traversal caller comes back as a lambda's anonymous method.
+    /// </summary>
+    private static ISymbol? UnwrapLambdaContainer(ISymbol? symbol)
+    {
+        while (symbol is IMethodSymbol method
+            && (method.MethodKind == MethodKind.AnonymousFunction
+                || method.MethodKind == MethodKind.LocalFunction))
+        {
+            symbol = symbol.ContainingSymbol;
+        }
+
+        return symbol;
     }
 
     private static void AddNodeAndContainers(TraversalGraph graph, ISymbol symbol, string? projectName)
