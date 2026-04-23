@@ -1,14 +1,23 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using CodeGraphToDgml.Core;
 using EnvDTE;
 using EnvDTE80;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
+using RoslynDocument = Microsoft.CodeAnalysis.Document;
 using RoslynSolution = Microsoft.CodeAnalysis.Solution;
 
 namespace CodeGraphToDgml.Vsix.Providers;
 
+/// <summary>
+/// Builds a reference graph that mirrors Visual Studio's built-in
+/// "Find All References" (Shift+F12) command. For the symbol resolved at the caret,
+/// every <see cref="ReferenceLocation"/> reported by
+/// <see cref="SymbolFinder.FindReferencesAsync(ISymbol, RoslynSolution, System.Threading.CancellationToken)"/>
+/// becomes a "References" link from the enclosing referrer (method/property/event/type)
+/// to the target symbol.
+/// </summary>
 internal sealed class RoslynReferencesProvider
 {
     private readonly ToolkitPackage _package;
@@ -60,13 +69,17 @@ internal sealed class RoslynReferencesProvider
 
         await _logger.WriteLineAsync($"[ResolveReferencesSubject] Position={position}, File={activeDocument.FullName}").ConfigureAwait(false);
 
-        var symbol = await ResolveTypeSymbolAsync(document, workspace, position, cancellationToken).ConfigureAwait(false);
+        var symbol = await ResolveSymbolAsync(document, workspace, position, cancellationToken).ConfigureAwait(false);
 
-        await _logger.WriteLineAsync($"[ResolveReferencesSubject] Resolved symbol: {symbol?.ToDisplayString() ?? "(null)"}, Kind={symbol?.Kind}").ConfigureAwait(false);
+        await _logger.WriteLineAsync($"[ResolveReferencesSubject] Raw symbol: {symbol?.ToDisplayString() ?? "(null)"}, Kind={symbol?.Kind}").ConfigureAwait(false);
 
-        if (symbol is not INamedTypeSymbol)
+        symbol = RoslynGraphHelpers.NormalizeSymbol(symbol);
+
+        await _logger.WriteLineAsync($"[ResolveReferencesSubject] Normalized symbol: {symbol?.ToDisplayString() ?? "(null)"}, Kind={symbol?.Kind}").ConfigureAwait(false);
+
+        if (symbol is null || !IsSupportedReferenceSymbol(symbol))
         {
-            await _logger.WriteLineAsync($"[ResolveReferencesSubject] Symbol rejected: not a named type.").ConfigureAwait(false);
+            await _logger.WriteLineAsync("[ResolveReferencesSubject] Symbol rejected: not a supported reference target.").ConfigureAwait(false);
             return null;
         }
 
@@ -87,114 +100,73 @@ internal sealed class RoslynReferencesProvider
             throw new InvalidOperationException("Unexpected hierarchy subject payload.");
         }
 
-        if (payload.Symbol is not INamedTypeSymbol rootType)
-        {
-            throw new InvalidOperationException("Expected a named type symbol.");
-        }
+        var target = RoslynGraphHelpers.NormalizeSymbol(payload.Symbol)
+            ?? throw new InvalidOperationException("Reference target symbol could not be resolved.");
 
         var normalizedOptions = options.Normalize();
         var graph = new TraversalGraph();
-        var visitedIds = new HashSet<string>(StringComparer.Ordinal);
-        var queue = new Queue<(INamedTypeSymbol Type, int Depth)>();
 
-        var rootProject = rootType.ContainingAssembly?.Name;
-        RoslynGraphHelpers.AddNodeAndContainers(graph, rootType, rootProject);
-        visitedIds.Add(RoslynGraphHelpers.GetProjectScopedId(rootType, rootProject));
-        queue.Enqueue((rootType, 0));
+        var targetProject = target.ContainingAssembly?.Name;
+        RoslynGraphHelpers.AddNodeAndContainers(graph, target, targetProject);
+        var targetId = RoslynGraphHelpers.GetProjectScopedId(target, targetProject);
 
-        while (queue.Count > 0)
+        progress?.Report(new TraversalProgress(
+            "Finding references",
+            0,
+            graph.NodeCount,
+            target.ToDisplayString()));
+
+        // Same Roslyn API the editor's "Find All References" (Shift+F12) is built on.
+        var references = await SymbolFinder.FindReferencesAsync(
+            target,
+            payload.Solution,
+            cancellationToken).ConfigureAwait(false);
+
+        var addedReferrers = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var referencedSymbol in references)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var (currentType, depth) = queue.Dequeue();
-            progress?.Report(new TraversalProgress(
-                "Finding references",
-                depth,
-                graph.NodeCount,
-                currentType.ToDisplayString()));
-
-            if (depth >= normalizedOptions.MaxDepth)
-            {
-                continue;
-            }
-
-            // Find derived classes
-            var derivedClasses = await SymbolFinder.FindDerivedClassesAsync(
-                currentType,
-                payload.Solution,
-                transitive: false,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-
-            foreach (var derived in derivedClasses)
+            foreach (var location in referencedSymbol.Locations)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var derivedOriginal = derived.OriginalDefinition;
-                if (!IsAllowed(derivedOriginal, normalizedOptions))
+                if (location.IsImplicit || !location.Location.IsInSource)
                 {
                     continue;
                 }
 
-                var derivedProject = derivedOriginal.ContainingAssembly?.Name;
-                RoslynGraphHelpers.AddNodeAndContainers(graph, derivedOriginal, derivedProject);
+                var referrer = await GetReferrerSymbolAsync(location, cancellationToken).ConfigureAwait(false);
+                if (referrer is null || !IsAllowed(referrer, normalizedOptions))
+                {
+                    continue;
+                }
 
-                graph.AddLink(new GraphLink(
-                    RoslynGraphHelpers.GetProjectScopedId(currentType, currentType.ContainingAssembly?.Name),
-                    RoslynGraphHelpers.GetProjectScopedId(derivedOriginal, derivedProject),
-                    "Overrides"));
+                // Self-reference (e.g. recursive method) â€” keep target node, skip the loopback link.
+                if (SymbolEqualityComparer.Default.Equals(referrer, target))
+                {
+                    continue;
+                }
+
+                var referrerProject = referrer.ContainingAssembly?.Name;
+                RoslynGraphHelpers.AddNodeAndContainers(graph, referrer, referrerProject);
+
+                var referrerId = RoslynGraphHelpers.GetProjectScopedId(referrer, referrerProject);
+                graph.AddLink(new GraphLink(referrerId, targetId, "References"));
+
+                if (addedReferrers.Add(referrerId))
+                {
+                    progress?.Report(new TraversalProgress(
+                        "Finding references",
+                        1,
+                        graph.NodeCount,
+                        referrer.ToDisplayString()));
+                }
 
                 if (graph.NodeCount >= normalizedOptions.MaxNodeCount)
                 {
                     return graph;
-                }
-
-                if (visitedIds.Add(RoslynGraphHelpers.GetProjectScopedId(derivedOriginal, derivedProject)))
-                {
-                    queue.Enqueue((derivedOriginal, depth + 1));
-                }
-            }
-
-            // Find implementations (if the current type is an interface)
-            if (currentType.TypeKind == TypeKind.Interface)
-            {
-                var implementations = await SymbolFinder.FindImplementationsAsync(
-                    currentType,
-                    payload.Solution,
-                    transitive: false,
-                    cancellationToken: cancellationToken).ConfigureAwait(false);
-
-                foreach (var impl in implementations)
-                {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    if (impl is not INamedTypeSymbol implType)
-                    {
-                        continue;
-                    }
-
-                    var implOriginal = implType.OriginalDefinition;
-                    if (!IsAllowed(implOriginal, normalizedOptions))
-                    {
-                        continue;
-                    }
-
-                    var implProject = implOriginal.ContainingAssembly?.Name;
-                    RoslynGraphHelpers.AddNodeAndContainers(graph, implOriginal, implProject);
-
-                    graph.AddLink(new GraphLink(
-                        RoslynGraphHelpers.GetProjectScopedId(currentType, currentType.ContainingAssembly?.Name),
-                        RoslynGraphHelpers.GetProjectScopedId(implOriginal, implProject),
-                        "Implements"));
-
-                    if (graph.NodeCount >= normalizedOptions.MaxNodeCount)
-                    {
-                        return graph;
-                    }
-
-                    if (visitedIds.Add(RoslynGraphHelpers.GetProjectScopedId(implOriginal, implProject)))
-                    {
-                        queue.Enqueue((implOriginal, depth + 1));
-                    }
                 }
             }
         }
@@ -202,8 +174,48 @@ internal sealed class RoslynReferencesProvider
         return graph;
     }
 
-    private static async Task<ISymbol?> ResolveTypeSymbolAsync(
-        Microsoft.CodeAnalysis.Document document,
+    private static async Task<ISymbol?> GetReferrerSymbolAsync(
+        ReferenceLocation location,
+        CancellationToken cancellationToken)
+    {
+        var document = location.Document;
+        if (document is null)
+        {
+            return null;
+        }
+
+        var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+        if (semanticModel is null)
+        {
+            return null;
+        }
+
+        var root = await semanticModel.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
+        var token = root.FindToken(location.Location.SourceSpan.Start);
+        var node = token.Parent;
+
+        // Walk up to the nearest real declared symbol so the graph never contains
+        // anonymous lambdas, local functions, or accessor synthetics.
+        while (node is not null)
+        {
+            var declared = semanticModel.GetDeclaredSymbol(node, cancellationToken);
+            if (declared is not null)
+            {
+                var normalized = RoslynGraphHelpers.NormalizeSymbol(declared);
+                if (normalized is not null && IsReferrerCandidate(normalized))
+                {
+                    return normalized;
+                }
+            }
+
+            node = node.Parent;
+        }
+
+        return null;
+    }
+
+    private static async Task<ISymbol?> ResolveSymbolAsync(
+        RoslynDocument document,
         Workspace workspace,
         int position,
         CancellationToken cancellationToken)
@@ -214,53 +226,88 @@ internal sealed class RoslynReferencesProvider
             return null;
         }
 
-        var root = await semanticModel.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
-        var token = root.FindToken(position);
-        var node = token.Parent;
-
-        while (node is not null)
-        {
-            var declaredSymbol = semanticModel.GetDeclaredSymbol(node, cancellationToken);
-            if (declaredSymbol is INamedTypeSymbol)
-            {
-                return declaredSymbol;
-            }
-
-            node = node.Parent;
-        }
-
+        // Prefer the symbol referenced at the caret (e.g. the type in `new Foo()`,
+        // the method in `Bar.Baz()`). Matches what Shift+F12 binds to.
         var symbol = await SymbolFinder.FindSymbolAtPositionAsync(
             semanticModel,
             position,
             workspace,
             cancellationToken).ConfigureAwait(false);
 
-        if (symbol is INamedTypeSymbol)
+        if (symbol is not null && IsSupportedReferenceSymbol(symbol))
         {
             return symbol;
         }
 
-        return null;
-    }
+        // Fallback: find an enclosing declaration (caret is on the declaration's identifier
+        // or inside its body without binding to a specific symbol).
+        var root = await semanticModel.SyntaxTree.GetRootAsync(cancellationToken).ConfigureAwait(false);
+        var token = root.FindToken(position);
+        var node = token.Parent;
 
-    private static bool IsAllowed(INamedTypeSymbol type, TraversalOptions options)
-    {
-        if (!options.IncludeExternalSymbols)
+        while (node is not null)
         {
-            var sourceLocation = type.Locations.FirstOrDefault(l => l.IsInSource);
-            if (sourceLocation is null)
+            var declared = semanticModel.GetDeclaredSymbol(node, cancellationToken);
+            if (declared is not null && IsSupportedReferenceSymbol(declared))
             {
-                return false;
+                return declared;
             }
+
+            node = node.Parent;
         }
 
-        if (!options.IncludeGeneratedCode)
+        return symbol;
+    }
+
+    /// <summary>
+    /// Symbol kinds we will look up references for. Mirrors the breadth of
+    /// the built-in "Find All References" command â€” types and members.
+    /// </summary>
+    private static bool IsSupportedReferenceSymbol(ISymbol symbol)
+    {
+        return symbol.Kind is SymbolKind.NamedType
+            or SymbolKind.Method
+            or SymbolKind.Property
+            or SymbolKind.Event
+            or SymbolKind.Field;
+    }
+
+    /// <summary>
+    /// Symbol kinds that are meaningful as graph nodes representing the referrer.
+    /// </summary>
+    private static bool IsReferrerCandidate(ISymbol symbol)
+    {
+        return symbol.Kind is SymbolKind.Method
+            or SymbolKind.Property
+            or SymbolKind.Event
+            or SymbolKind.Field
+            or SymbolKind.NamedType;
+    }
+
+    private static bool IsAllowed(ISymbol symbol, TraversalOptions options)
+    {
+        var sourceLocation = symbol.Locations.FirstOrDefault(l => l.IsInSource);
+
+        if (!options.IncludeExternalSymbols && sourceLocation is null)
         {
-            var sourceLocation = type.Locations.FirstOrDefault(l => l.IsInSource);
-            if (sourceLocation is not null && IsGenerated(sourceLocation.SourceTree?.FilePath))
-            {
-                return false;
-            }
+            return false;
+        }
+
+        if (!options.IncludeGeneratedCode
+            && sourceLocation is not null
+            && IsGenerated(sourceLocation.SourceTree?.FilePath))
+        {
+            return false;
+        }
+
+        if (symbol.Kind == SymbolKind.Property && !options.IncludeProperties)
+        {
+            return false;
+        }
+
+        if (symbol.Kind == SymbolKind.Event && !options.IncludeEvents)
+        {
+            return false;
         }
 
         return true;

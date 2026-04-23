@@ -41,7 +41,7 @@ internal sealed class AllReferencesToDgmlOperationService
         var options = General.Instance;
         using var progress = new OperationProgressController(_package);
 
-        progress.Start("Code Graph to DGML: resolving type...");
+        progress.Start("Code Graph to DGML: resolving symbol...");
 
         try
         {
@@ -49,10 +49,10 @@ internal sealed class AllReferencesToDgmlOperationService
 
             if (subject is null)
             {
-                await _outputWindowLogger.WriteLineAsync("No supported type symbol was found at the caret.").ConfigureAwait(true);
-                await progress.FailAsync("Code Graph to DGML: no supported type at the caret.").ConfigureAwait(true);
+                await _outputWindowLogger.WriteLineAsync("No supported symbol was found at the caret.").ConfigureAwait(true);
+                await progress.FailAsync("Code Graph to DGML: no supported symbol at the caret.").ConfigureAwait(true);
                 await ShowMessageAsync(
-                    "Place the caret on a C# or Visual Basic class, struct, interface, or record and try again.",
+                    "Place the caret on a C# or Visual Basic type or member (class, struct, interface, record, method, property, event, or field) and try again.",
                     OLEMSGICON.OLEMSGICON_INFO).ConfigureAwait(true);
                 return;
             }
