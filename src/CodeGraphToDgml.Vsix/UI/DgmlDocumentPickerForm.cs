@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Windows.Forms;
@@ -57,7 +58,10 @@ internal sealed class DgmlDocumentPickerForm : Form
             Width = 500,
             Height = 150,
             Enabled = false,
+            DrawMode = DrawMode.OwnerDrawFixed,
+            IntegralHeight = false,
         };
+        _documentsListBox.DrawItem += DocumentsListBox_DrawItem;
 
         foreach (var document in openDocuments.OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
         {
@@ -117,5 +121,57 @@ internal sealed class DgmlDocumentPickerForm : Form
     private void SelectionModeChanged(object? sender, EventArgs e)
     {
         _documentsListBox.Enabled = _useExistingRadioButton.Checked;
+        _documentsListBox.Invalidate();
+    }
+
+    private void DocumentsListBox_DrawItem(object? sender, DrawItemEventArgs e)
+    {
+        if (e.Index < 0)
+        {
+            return;
+        }
+
+        var listBox = (ListBox)sender!;
+        var enabled = listBox.Enabled;
+        var isSelected = (e.State & DrawItemState.Selected) == DrawItemState.Selected;
+
+        Color backColor;
+        Color foreColor;
+
+        if (!enabled)
+        {
+            backColor = SystemColors.Control;
+            foreColor = SystemColors.GrayText;
+        }
+        else if (isSelected)
+        {
+            backColor = SystemColors.Highlight;
+            foreColor = SystemColors.HighlightText;
+        }
+        else
+        {
+            backColor = listBox.BackColor;
+            foreColor = listBox.ForeColor;
+        }
+
+        using (var backBrush = new SolidBrush(backColor))
+        {
+            e.Graphics.FillRectangle(backBrush, e.Bounds);
+        }
+
+        var text = listBox.Items[e.Index]?.ToString() ?? string.Empty;
+        TextRenderer.DrawText(
+            e.Graphics,
+            text,
+            e.Font ?? listBox.Font,
+            e.Bounds,
+            foreColor,
+            backColor,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+
+        if (enabled && isSelected)
+        {
+            e.DrawFocusRectangle();
+        }
     }
 }
