@@ -161,14 +161,14 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 var calledSymbol = NormalizeSymbol(callerInfo.CalledSymbol);
 
                 var callerProject = caller.ContainingAssembly?.Name;
-                AddNodeAndContainers(graph, caller, callerProject);
+                AddNodeAndContainers(graph, caller, callerProject, roslynSubject.Solution);
 
                 if (calledSymbol is not null && !SymbolEqualityComparer.Default.Equals(calledSymbol, currentCallee))
                 {
                     var calledProject = calledSymbol.ContainingAssembly?.Name;
                     var calleeProject = currentCallee!.ContainingAssembly?.Name;
-                    AddNodeAndContainers(graph, calledSymbol, calledProject);
-                    AddNodeAndContainers(graph, currentCallee, calleeProject);
+                    AddNodeAndContainers(graph, calledSymbol, calledProject, roslynSubject.Solution);
+                    AddNodeAndContainers(graph, currentCallee, calleeProject, roslynSubject.Solution);
 
                     graph.AddLink(new GraphLink(GetProjectScopedId(caller, callerProject), GetProjectScopedId(calledSymbol, calledProject), "CodeSchema_Calls"));
                     var relationshipCategory = calledSymbol.ContainingType?.TypeKind == TypeKind.Interface ? "Implements" : "Overrides";
@@ -177,7 +177,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 else if (currentCallee is not null)
                 {
                     var calleeProject = currentCallee.ContainingAssembly?.Name;
-                    AddNodeAndContainers(graph, currentCallee, calleeProject);
+                    AddNodeAndContainers(graph, currentCallee, calleeProject, roslynSubject.Solution);
                     graph.AddLink(new GraphLink(GetProjectScopedId(caller, callerProject), GetProjectScopedId(currentCallee, calleeProject), "CodeSchema_Calls"));
                 }
 
@@ -204,8 +204,8 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                         var hostProject = host.ContainingAssembly?.Name;
                         var componentProject = component.ContainingAssembly?.Name;
 
-                        AddNodeAndContainers(graph, host, hostProject);
-                        AddNodeAndContainers(graph, component, componentProject);
+                        AddNodeAndContainers(graph, host, hostProject, roslynSubject.Solution);
+                        AddNodeAndContainers(graph, component, componentProject, roslynSubject.Solution);
 
                         graph.AddLink(new GraphLink(
                             GetProjectScopedId(host, hostProject),
@@ -238,7 +238,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 return;
             }
 
-            AddNodeAndContainers(graph, normalized, projectName);
+            AddNodeAndContainers(graph, normalized, projectName, roslynSubject.Solution);
             queue.Enqueue((normalized, depth));
         }
     }
@@ -299,8 +299,8 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
                 var calleeProject = normalized.ContainingAssembly?.Name;
 
-                AddNodeAndContainers(graph, currentNormalized, currentProject);
-                AddNodeAndContainers(graph, normalized, calleeProject);
+                AddNodeAndContainers(graph, currentNormalized, currentProject, roslynSubject.Solution);
+                AddNodeAndContainers(graph, normalized, calleeProject, roslynSubject.Solution);
 
                 graph.AddLink(new GraphLink(
                     GetProjectScopedId(currentNormalized, currentProject),
@@ -322,7 +322,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
                 if (normalized.IsOverride)
                 {
-                    if (AddOverriddenBase(graph, normalized, calleeProject, normalizedOptions, depth, Enqueue))
+                    if (AddOverriddenBase(graph, normalized, calleeProject, roslynSubject.Solution, normalizedOptions, depth, Enqueue))
                         return graph;
                 }
             }
@@ -345,7 +345,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 return;
             }
 
-            AddNodeAndContainers(graph, normalized, projectName);
+            AddNodeAndContainers(graph, normalized, projectName, roslynSubject.Solution);
             queue.Enqueue((normalized, depth));
         }
     }
@@ -378,7 +378,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             }
 
             var implProject = normImpl.ContainingAssembly?.Name;
-            AddNodeAndContainers(graph, normImpl, implProject);
+            AddNodeAndContainers(graph, normImpl, implProject, solution);
 
             graph.AddLink(new GraphLink(
                 GetProjectScopedId(interfaceMember, interfaceProject),
@@ -402,6 +402,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         TraversalGraph graph,
         ISymbol overridingMember,
         string? overridingProject,
+        RoslynSolution solution,
         TraversalOptions options,
         int depth,
         Action<ISymbol, int> enqueue)
@@ -413,7 +414,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         if (normBase is null || !IsAllowed(normBase, options)) return false;
 
         var baseProject = normBase.ContainingAssembly?.Name;
-        AddNodeAndContainers(graph, normBase, baseProject);
+        AddNodeAndContainers(graph, normBase, baseProject, solution);
 
         graph.AddLink(new GraphLink(
             GetProjectScopedId(normBase, baseProject),
@@ -524,7 +525,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         return symbol;
     }
 
-    private static void AddNodeAndContainers(TraversalGraph graph, ISymbol symbol, string? projectName)
+    private static void AddNodeAndContainers(TraversalGraph graph, ISymbol symbol, string? projectName, RoslynSolution? solution = null)
     {
         var node = CreateNode(symbol, projectName);
         if (graph.ContainsNode(node.Id)) return;
@@ -537,6 +538,25 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         {
             if (currentContainer is INamespaceSymbol ns && ns.IsGlobalNamespace)
             {
+                if (solution != null && projectName != null)
+                {
+                    var proj = solution.Projects.FirstOrDefault(p => p.AssemblyName == projectName);
+                    if (proj != null && !string.IsNullOrWhiteSpace(proj.DefaultNamespace))
+                    {
+                        var defaultNsId = $"Project={projectName}|N:{proj.DefaultNamespace}";
+                        var defaultNsNode = new GraphNode(
+                            defaultNsId,
+                            proj.DefaultNamespace!,
+                            "CodeSchema_Namespace",
+                            null,
+                            null,
+                            null);
+
+                        graph.UpsertNode(defaultNsNode);
+                        graph.AddLink(new GraphLink(defaultNsNode.Id, currentId, "Contains"));
+                        currentId = defaultNsId;
+                    }
+                }
                 break;
             }
 

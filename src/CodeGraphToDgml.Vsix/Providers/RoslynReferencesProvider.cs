@@ -107,7 +107,7 @@ internal sealed class RoslynReferencesProvider
         var graph = new TraversalGraph();
 
         var targetProject = target.ContainingAssembly?.Name;
-        RoslynGraphHelpers.AddNodeAndContainers(graph, target, targetProject);
+        RoslynGraphHelpers.AddNodeAndContainers(graph, target, targetProject, payload.Solution);
         var targetId = RoslynGraphHelpers.GetProjectScopedId(target, targetProject);
 
         progress?.Report(new TraversalProgress(
@@ -150,7 +150,7 @@ internal sealed class RoslynReferencesProvider
                 }
 
                 var referrerProject = referrer.ContainingAssembly?.Name;
-                RoslynGraphHelpers.AddNodeAndContainers(graph, referrer, referrerProject);
+                RoslynGraphHelpers.AddNodeAndContainers(graph, referrer, referrerProject, payload.Solution);
 
                 var referrerId = RoslynGraphHelpers.GetProjectScopedId(referrer, referrerProject);
                 graph.AddLink(new GraphLink(referrerId, targetId, "References"));

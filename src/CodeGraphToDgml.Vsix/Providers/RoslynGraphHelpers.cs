@@ -27,7 +27,7 @@ internal static class RoslynGraphHelpers
             || extension.Equals(".vb", StringComparison.OrdinalIgnoreCase);
     }
 
-    internal static void AddNodeAndContainers(TraversalGraph graph, ISymbol symbol, string? projectName)
+    internal static void AddNodeAndContainers(TraversalGraph graph, ISymbol symbol, string? projectName, RoslynSolution? solution = null)
     {
         var node = CreateNode(symbol, projectName);
         if (graph.ContainsNode(node.Id)) return;
@@ -40,6 +40,25 @@ internal static class RoslynGraphHelpers
         {
             if (currentContainer is INamespaceSymbol ns && ns.IsGlobalNamespace)
             {
+                if (solution != null && projectName != null)
+                {
+                    var proj = solution.Projects.FirstOrDefault(p => p.AssemblyName == projectName);
+                    if (proj != null && !string.IsNullOrWhiteSpace(proj.DefaultNamespace))
+                    {
+                        var defaultNsId = $"Project={projectName}|N:{proj.DefaultNamespace}";
+                        var defaultNsNode = new GraphNode(
+                            defaultNsId,
+                            proj.DefaultNamespace!,
+                            "CodeSchema_Namespace",
+                            null,
+                            null,
+                            null);
+
+                        graph.UpsertNode(defaultNsNode);
+                        graph.AddLink(new GraphLink(defaultNsNode.Id, currentId, "Contains"));
+                        currentId = defaultNsId;
+                    }
+                }
                 break;
             }
 
