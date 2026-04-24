@@ -40,7 +40,7 @@ internal static class RoslynGraphHelpers
         {
             if (currentContainer is INamespaceSymbol ns && ns.IsGlobalNamespace)
             {
-                if (solution != null && projectName != null)
+                if (solution != null && projectName != null && currentId == node.Id)
                 {
                     var proj = solution.Projects.FirstOrDefault(p => p.AssemblyName == projectName);
                     if (proj != null && !string.IsNullOrWhiteSpace(proj.DefaultNamespace))
