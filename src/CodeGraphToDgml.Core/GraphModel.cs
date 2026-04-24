@@ -56,6 +56,9 @@ public sealed class TraversalGraph
 
     public void AddLink(GraphLink link)
     {
+        // Prevent self-referential 'Contains' links
+        if (link.Category == "Contains" && link.SourceId == link.TargetId)
+            return;
         _links.Add(link);
     }
 
