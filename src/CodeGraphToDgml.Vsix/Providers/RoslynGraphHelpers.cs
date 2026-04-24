@@ -46,17 +46,21 @@ internal static class RoslynGraphHelpers
                     if (proj != null && !string.IsNullOrWhiteSpace(proj.DefaultNamespace))
                     {
                         var defaultNsId = $"Project={projectName}|N:{proj.DefaultNamespace}";
-                        var defaultNsNode = new GraphNode(
-                            defaultNsId,
-                            proj.DefaultNamespace!,
-                            "CodeSchema_Namespace",
-                            null,
-                            null,
-                            null);
+                        
+                        if (currentId != defaultNsId)
+                        {
+                            var defaultNsNode = new GraphNode(
+                                defaultNsId,
+                                proj.DefaultNamespace!,
+                                "CodeSchema_Namespace",
+                                null,
+                                null,
+                                null);
 
-                        graph.UpsertNode(defaultNsNode);
-                        graph.AddLink(new GraphLink(defaultNsNode.Id, currentId, "Contains"));
-                        currentId = defaultNsId;
+                            graph.UpsertNode(defaultNsNode);
+                            graph.AddLink(new GraphLink(defaultNsNode.Id, currentId, "Contains"));
+                            currentId = defaultNsId;
+                        }
                     }
                 }
                 break;
