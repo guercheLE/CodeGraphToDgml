@@ -58,7 +58,10 @@ internal static class RoslynGraphHelpers
                                 null);
 
                             graph.UpsertNode(defaultNsNode);
-                            graph.AddLink(new GraphLink(defaultNsNode.Id, currentId, "Contains"));
+                            if (defaultNsNode.Id != currentId)
+                            {
+                                graph.AddLink(new GraphLink(defaultNsNode.Id, currentId, "Contains"));
+                            }
                             currentId = defaultNsId;
                         }
                     }
@@ -68,7 +71,10 @@ internal static class RoslynGraphHelpers
 
             var containerNode = CreateContainerNode(currentContainer, projectName);
             graph.UpsertNode(containerNode);
-            graph.AddLink(new GraphLink(containerNode.Id, currentId, "Contains"));
+            if (containerNode.Id != currentId)
+            {
+                graph.AddLink(new GraphLink(containerNode.Id, currentId, "Contains"));
+            }
 
             currentId = containerNode.Id;
             currentContainer = currentContainer.ContainingSymbol;
@@ -86,7 +92,10 @@ internal static class RoslynGraphHelpers
                 projectName);
 
             graph.UpsertNode(projectNode);
-            graph.AddLink(new GraphLink(projectId, currentId, "Contains"));
+            if (projectId != currentId)
+            {
+                graph.AddLink(new GraphLink(projectId, currentId, "Contains"));
+            }
         }
     }
 
