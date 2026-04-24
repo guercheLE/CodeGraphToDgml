@@ -116,7 +116,7 @@ public sealed class TraversalGraph
             foreach (var incoming in incomingLinks)
             {
                 _links.Remove(incoming);
-                _links.Add(new GraphLink(incoming.SourceId, onlyChildId, incoming.Category));
+                AddLink(new GraphLink(incoming.SourceId, onlyChildId, incoming.Category));
             }
 
             _links.Remove(childLinks[0]);
