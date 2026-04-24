@@ -462,29 +462,50 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
             foreach (var descendant in syntaxNode.DescendantNodes())
             {
-                var symbolInfo = semanticModel.GetSymbolInfo(descendant, cancellationToken);
-                var resolved = symbolInfo.Symbol ?? (symbolInfo.CandidateSymbols.Length == 1 ? symbolInfo.CandidateSymbols[0] : null);
-
-                if (resolved is null)
+                // Only process invocation expressions for chained call analysis
+                if (descendant is Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax invocation)
                 {
-                    continue;
-                }
+                    var symbolInfo = semanticModel.GetSymbolInfo(invocation, cancellationToken);
+                    var resolved = symbolInfo.Symbol ?? (symbolInfo.CandidateSymbols.Length == 1 ? symbolInfo.CandidateSymbols[0] : null);
 
-                var normalized = NormalizeSymbol(resolved);
-                if (normalized is null || !IsSupportedCalleeSymbol(normalized))
-                {
-                    continue;
-                }
+                    if (resolved is null)
+                    {
+                        continue;
+                    }
 
-                // Skip self-references.
-                if (SymbolEqualityComparer.Default.Equals(normalized, NormalizeSymbol(symbol)))
-                {
-                    continue;
-                }
+                    var normalized = NormalizeSymbol(resolved);
+                    if (normalized is null || !IsSupportedCalleeSymbol(normalized))
+                    {
+                        continue;
+                    }
 
-                if (seen.Add(normalized))
-                {
-                    callees.Add(normalized);
+                    // Skip self-references.
+                    if (SymbolEqualityComparer.Default.Equals(normalized, NormalizeSymbol(symbol)))
+                    {
+                        continue;
+                    }
+
+                    if (seen.Add(normalized))
+                    {
+                        callees.Add(normalized);
+                    }
+
+                    // Recursively resolve chained member accesses (e.g., obj.Property.Method())
+                    var expr = invocation.Expression;
+                    while (expr is Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax memberAccess)
+                    {
+                        var memberSymbolInfo = semanticModel.GetSymbolInfo(memberAccess, cancellationToken);
+                        var memberResolved = memberSymbolInfo.Symbol ?? (memberSymbolInfo.CandidateSymbols.Length == 1 ? memberSymbolInfo.CandidateSymbols[0] : null);
+                        var memberNormalized = NormalizeSymbol(memberResolved);
+                        if (memberNormalized != null && IsSupportedCalleeSymbol(memberNormalized))
+                        {
+                            if (!SymbolEqualityComparer.Default.Equals(memberNormalized, NormalizeSymbol(symbol)) && seen.Add(memberNormalized))
+                            {
+                                callees.Add(memberNormalized);
+                            }
+                        }
+                        expr = memberAccess.Expression;
+                    }
                 }
             }
         }

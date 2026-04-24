@@ -163,6 +163,9 @@ internal sealed class DgmlDocumentService
     {
         ThreadHelper.ThrowIfNotOnUIThread();
 
+        if (serviceProvider == null)
+            throw new ArgumentNullException(nameof(serviceProvider));
+
         try
         {
             VsShellUtilities.OpenDocument(
@@ -172,6 +175,8 @@ internal sealed class DgmlDocumentService
                 out _,
                 out _,
                 out var windowFrame);
+            if (windowFrame == null)
+                throw new InvalidOperationException($"Could not obtain a window frame for '{Path.GetFileName(fullPath)}' via VsShellUtilities.OpenDocument.");
             return windowFrame;
         }
         catch (NullReferenceException)
@@ -179,17 +184,26 @@ internal sealed class DgmlDocumentService
             // VsShellUtilities.OpenDocument can throw NullReferenceException inside
             // ExternalFilesProject.OpenItemImplAsync for temp/external files (VS internal bug).
             // Fall back to DTE.ItemOperations.OpenFile and retrieve the frame from the RDT.
-            var dte = serviceProvider.GetService(typeof(DTE)) as DTE2
-                ?? throw new InvalidOperationException("DTE service is unavailable.");
+            var dteObj = serviceProvider.GetService(typeof(DTE));
+            if (dteObj is not DTE2 dte)
+                throw new InvalidOperationException("DTE service is unavailable (fallback after OpenDocument failure).");
 
-            dte.ItemOperations.OpenFile(fullPath, EnvDTE.Constants.vsViewKindPrimary);
+            try
+            {
+                dte.ItemOperations.OpenFile(fullPath, EnvDTE.Constants.vsViewKindPrimary);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"DTE.ItemOperations.OpenFile failed for '{fullPath}': {ex.Message}", ex);
+            }
 
             VsShellUtilities.IsDocumentOpen(
                 serviceProvider, fullPath, VSConstants.LOGVIEWID_Primary,
                 out _, out _, out var frame);
 
-            return frame ?? throw new InvalidOperationException(
-                $"Could not obtain a window frame for '{Path.GetFileName(fullPath)}'.");
+            if (frame == null)
+                throw new InvalidOperationException($"Could not obtain a window frame for '{Path.GetFileName(fullPath)}' after both OpenDocument and DTE fallback.");
+            return frame;
         }
     }
 }
