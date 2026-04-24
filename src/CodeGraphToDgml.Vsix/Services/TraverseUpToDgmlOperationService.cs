@@ -137,8 +137,8 @@ internal sealed class TraverseUpToDgmlOperationService
 
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
 
-        using var picker = new DgmlDocumentPickerForm(openDocuments.Select(document => document.FullPath).ToArray());
-        if (picker.ShowDialog() != System.Windows.Forms.DialogResult.OK)
+        var picker = new DgmlDocumentPickerWindow(openDocuments.Select(document => document.FullPath).ToArray());
+        if (picker.ShowDialog() != true)
         {
             throw new OperationCanceledException();
         }

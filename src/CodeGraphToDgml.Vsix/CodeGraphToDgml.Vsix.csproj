@@ -4,7 +4,7 @@
     <OutputType>Library</OutputType>
     <AssemblyName>CodeGraphToDgml.Vsix</AssemblyName>
     <RootNamespace>CodeGraphToDgml.Vsix</RootNamespace>
-    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
     <GeneratePkgDefFile>true</GeneratePkgDefFile>
     <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
     <IncludeDebugSymbolsInVSIXContainer>false</IncludeDebugSymbolsInVSIXContainer>
