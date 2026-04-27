@@ -33,21 +33,20 @@ internal static class RoslynGraphHelpers
         if (graph.ContainsNode(node.Id)) return;
         graph.UpsertNode(node);
 
-        var currentId = node.Id;
+        var childId = node.Id;
         var currentContainer = symbol.ContainingSymbol;
 
         while (currentContainer != null)
         {
             if (currentContainer is INamespaceSymbol ns && ns.IsGlobalNamespace)
             {
-                if (solution != null && projectName != null && currentId == node.Id)
+                if (solution != null && projectName != null && childId == node.Id)
                 {
                     var proj = solution.Projects.FirstOrDefault(p => p.AssemblyName == projectName);
                     if (proj != null && !string.IsNullOrWhiteSpace(proj.DefaultNamespace))
                     {
                         var defaultNsId = $"Project={projectName}|N:{proj.DefaultNamespace}";
-                        
-                        if (currentId != defaultNsId)
+                        if (childId != defaultNsId)
                         {
                             var defaultNsNode = new GraphNode(
                                 defaultNsId,
@@ -56,27 +55,48 @@ internal static class RoslynGraphHelpers
                                 null,
                                 null,
                                 null);
-
                             graph.UpsertNode(defaultNsNode);
-                            if (defaultNsNode.Id != currentId)
+                            if (defaultNsNode.Id != childId)
                             {
-                                graph.AddLink(new GraphLink(defaultNsNode.Id, currentId, "Contains"));
+                                graph.AddLink(new GraphLink(defaultNsNode.Id, childId, "Contains"));
                             }
-                            currentId = defaultNsId;
+                            childId = defaultNsId;
                         }
                     }
                 }
                 break;
             }
 
-            var containerNode = CreateContainerNode(currentContainer, projectName);
-            graph.UpsertNode(containerNode);
-            if (containerNode.Id != currentId)
+            // Only create 'Contains' link for direct parent namespace
+            if (currentContainer is INamespaceSymbol nsContainer && symbol is INamespaceSymbol nsSymbol)
             {
-                graph.AddLink(new GraphLink(containerNode.Id, currentId, "Contains"));
+                // Only link if nsContainer is the immediate parent of nsSymbol
+                var childName = nsSymbol.ToDisplayString();
+                var parentName = nsContainer.ToDisplayString();
+                if (!string.IsNullOrEmpty(parentName) &&
+                    childName.StartsWith(parentName + ".") &&
+                    childName.Substring(parentName.Length + 1).IndexOf('.') == -1)
+                {
+                    var containerNode = CreateContainerNode(currentContainer, projectName);
+                    graph.UpsertNode(containerNode);
+                    if (containerNode.Id != childId)
+                    {
+                        graph.AddLink(new GraphLink(containerNode.Id, childId, "Contains"));
+                    }
+                    childId = containerNode.Id;
+                }
+                // Move up one level
+                currentContainer = currentContainer.ContainingSymbol;
+                continue;
             }
 
-            currentId = containerNode.Id;
+            var containerNodeGeneral = CreateContainerNode(currentContainer, projectName);
+            graph.UpsertNode(containerNodeGeneral);
+            if (containerNodeGeneral.Id != childId)
+            {
+                graph.AddLink(new GraphLink(containerNodeGeneral.Id, childId, "Contains"));
+            }
+            childId = containerNodeGeneral.Id;
             currentContainer = currentContainer.ContainingSymbol;
         }
 
@@ -92,9 +112,9 @@ internal static class RoslynGraphHelpers
                 projectName);
 
             graph.UpsertNode(projectNode);
-            if (projectId != currentId)
+            if (projectId != childId)
             {
-                graph.AddLink(new GraphLink(projectId, currentId, "Contains"));
+                graph.AddLink(new GraphLink(projectId, childId, "Contains"));
             }
         }
     }
