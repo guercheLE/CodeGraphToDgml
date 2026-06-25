@@ -559,23 +559,26 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         {
             if (currentContainer is INamespaceSymbol ns && ns.IsGlobalNamespace)
             {
-                if (solution != null && projectName != null)
+                if (solution != null && projectName != null && currentId == node.Id)
                 {
                     var proj = solution.Projects.FirstOrDefault(p => p.AssemblyName == projectName);
                     if (proj != null && !string.IsNullOrWhiteSpace(proj.DefaultNamespace))
                     {
                         var defaultNsId = $"Project={projectName}|N:{proj.DefaultNamespace}";
-                        var defaultNsNode = new GraphNode(
-                            defaultNsId,
-                            proj.DefaultNamespace!,
-                            "CodeSchema_Namespace",
-                            null,
-                            null,
-                            null);
+                        if (defaultNsId != currentId)
+                        {
+                            var defaultNsNode = new GraphNode(
+                                defaultNsId,
+                                proj.DefaultNamespace!,
+                                "CodeSchema_Namespace",
+                                null,
+                                null,
+                                null);
 
-                        graph.UpsertNode(defaultNsNode);
-                        graph.AddLink(new GraphLink(defaultNsNode.Id, currentId, "Contains"));
-                        currentId = defaultNsId;
+                            graph.UpsertNode(defaultNsNode);
+                            graph.AddLink(new GraphLink(defaultNsNode.Id, currentId, "Contains"));
+                            currentId = defaultNsId;
+                        }
                     }
                 }
                 break;
