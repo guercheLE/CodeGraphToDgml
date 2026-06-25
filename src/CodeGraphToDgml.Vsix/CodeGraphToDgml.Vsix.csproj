@@ -1,25 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <OutputType>Library</OutputType>
     <AssemblyName>CodeGraphToDgml.Vsix</AssemblyName>
     <RootNamespace>CodeGraphToDgml.Vsix</RootNamespace>
     <UseWPF>true</UseWPF>
     <GeneratePkgDefFile>true</GeneratePkgDefFile>
     <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
     <IncludeDebugSymbolsInVSIXContainer>false</IncludeDebugSymbolsInVSIXContainer>
-    <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
     <UseCodebase>true</UseCodebase>
-    <BaseIntermediateOutputPath Condition="'$(BaseIntermediateOutputPath)' == ''">obj\</BaseIntermediateOutputPath>
-    <IntermediateOutputPath Condition="'$(IntermediateOutputPath)' == ''">$(BaseIntermediateOutputPath)$(Configuration)\</IntermediateOutputPath>
-    <TargetVsixContainerName Condition="'$(TargetVsixContainerName)' == ''">$(AssemblyName).vsix</TargetVsixContainerName>
-    <TargetVsixContainer Condition="'$(TargetVsixContainer)' == ''">$(MSBuildProjectDirectory)\bin\$(Configuration)\$(TargetFramework)\$(TargetVsixContainerName)</TargetVsixContainer>
+    <VSSDKBuildToolsAutoSetup>true</VSSDKBuildToolsAutoSetup>
+    <VsixDeployOnDebug>true</VsixDeployOnDebug>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectCapability Include="CreateVsixContainer" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Community.VisualStudio.Toolkit.17" Version="17.0.551" />
     <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.14.40265" ExcludeAssets="runtime" />
-    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.14.2142" PrivateAssets="all" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.5.38461" />
     <PackageReference Include="Microsoft.VsSDK.CompatibilityAnalyzer" Version="18.3.1108" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.3.0" />
     <PackageReference Include="Microsoft.CodeAnalysis.VisualBasic.Workspaces" Version="5.3.0" />
@@ -37,17 +37,4 @@
       <SubType>Designer</SubType>
     </None>
   </ItemGroup>
-
-  <Import Project="$(PkgMicrosoft_VSSDK_BuildTools)\tools\VSSDK\Microsoft.VsSDK.targets"
-          Condition="'$(PkgMicrosoft_VSSDK_BuildTools)' != '' and Exists('$(PkgMicrosoft_VSSDK_BuildTools)\tools\VSSDK\Microsoft.VsSDK.targets')" />
-
-  <Target Name="SetCreatePkgDefAssemblyToProcess" BeforeTargets="GeneratePkgDef">
-    <PropertyGroup>
-      <CreatePkgDefAssemblyToProcess>$(TargetPath)</CreatePkgDefAssemblyToProcess>
-    </PropertyGroup>
-  </Target>
-
-  <Target Name="CreateVsixContainerAfterBuild" AfterTargets="Build" Condition="'$(DesignTimeBuild)' != 'true'">
-    <CallTarget Targets="GeneratePkgDef;CopyPkgDef;CreateVsixContainer" />
-  </Target>
 </Project>
