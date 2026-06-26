@@ -638,4 +638,262 @@ public sealed class MermaidSequenceSerializerTests
         Assert.IsNotNull(node.NestedCalls);
         Assert.IsEmpty(node.NestedCalls);
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Multi-section: global numbering
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // Builds a sequence with 4 distinct participants per root call so the total
+    // forces a split when maxParticipantsPerDiagram=3.
+    private static CallSequence TwoPhaseSequence() => new()
+    {
+        Title = "Root",
+        Participants =
+        [
+            P("A","A"), P("B","B"), P("C","C"),
+            P("D","D"), P("E","E"), P("F","F"),
+        ],
+        RootCalls =
+        [
+            // Phase 1: participants A, B, C
+            Nested("A", "B", "Phase1Call", Leaf("B", "C", "Inner1")),
+            // Phase 2: participants D, E, F
+            Nested("D", "E", "Phase2Call", Leaf("E", "F", "Inner2")),
+        ],
+    };
+
+    [TestMethod]
+    public void BuildMarkdown_MultiSection_SecondSectionHasHigherAutonumber()
+    {
+        // maxParticipantsPerDiagram=3 forces a split between the two phases
+        var result = Serializer.BuildMarkdown(TwoPhaseSequence(),
+            stackedActivationBars: true, autoNumber: true, maxParticipantsPerDiagram: 3);
+
+        // Both sections must contain autonumber
+        var lines = result.Split('\n').Select(l => l.Trim()).ToArray();
+        var autonumberLines = lines.Where(l => l.StartsWith("autonumber")).ToArray();
+
+        Assert.IsGreaterThanOrEqualTo(2, autonumberLines.Length, "Expected at least 2 autonumber directives");
+
+        // First autonumber starts at 1 (or just "autonumber" without a number)
+        var first = autonumberLines[0];
+        Assert.IsTrue(first == "autonumber" || first == "autonumber 1",
+            "First autonumber should start at 1, got: " + first);
+
+        // Second autonumber must be > 1 (global continuation)
+        var second = autonumberLines[1];
+        Assert.IsTrue(second.StartsWith("autonumber ") && second != "autonumber 1",
+            "Second section autonumber must continue from where first left off, got: " + second);
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_MultiSection_SecondSectionStartNumberEqualsFirstSectionArrowCount()
+    {
+        // With stackedBars=true: each call contributes 1 call + 1 return = 2 arrows.
+        // Phase 1: A→B (call+return) + B→C (call+return) = 4 arrows.
+        // Phase 2 should start at autonumber 5.
+        var result = Serializer.BuildMarkdown(TwoPhaseSequence(),
+            stackedActivationBars: true, autoNumber: true, maxParticipantsPerDiagram: 3);
+
+        var lines = result.Split('\n').Select(l => l.Trim()).ToArray();
+        var autonumberLines = lines.Where(l => l.StartsWith("autonumber")).ToArray();
+
+        Assert.IsGreaterThanOrEqualTo(2, autonumberLines.Length);
+        Assert.AreEqual("autonumber 5", autonumberLines[1],
+            "Phase 2 should start at message 5 (4 arrows in phase 1 + 1)");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_MultiSection_SingleDiagramWhenBelowLimit()
+    {
+        // With maxParticipantsPerDiagram=10, all 6 participants fit; no split expected.
+        var result = Serializer.BuildMarkdown(TwoPhaseSequence(),
+            stackedActivationBars: true, autoNumber: true, maxParticipantsPerDiagram: 10);
+
+        var autonumberLines = result.Split('\n')
+            .Select(l => l.Trim())
+            .Where(l => l.StartsWith("autonumber"))
+            .ToArray();
+
+        Assert.HasCount(1, autonumberLines, "Should be a single diagram when all participants fit");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Multi-section: business titles
+    // ──────────────────────────────────────────────────────────────────────────
+
+    [TestMethod]
+    public void BuildMarkdown_MultiSection_HeadingsContainCallLabels()
+    {
+        var result = Serializer.BuildMarkdown(TwoPhaseSequence(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 3);
+
+        // Section headings should reference actual method names, not "Levels N-M"
+        Assert.Contains("Phase1Call", result, "First section heading should mention Phase1Call");
+        Assert.Contains("Phase2Call", result, "Second section heading should mention Phase2Call");
+        Assert.DoesNotContain("Levels", result, "Headings must not use depth-level notation");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Multi-section: HTML continuation banners
+    // ──────────────────────────────────────────────────────────────────────────
+
+    [TestMethod]
+    public void BuildHtml_MultiSection_ContainsContinuationBanners()
+    {
+        var result = Serializer.BuildHtml(TwoPhaseSequence(),
+            stackedActivationBars: true, autoNumber: true, maxParticipantsPerDiagram: 3);
+
+        Assert.Contains("continuation-top", result, "Should have top continuation banner");
+        Assert.Contains("continuation-bottom", result, "Should have bottom continuation banner");
+    }
+
+    [TestMethod]
+    public void BuildHtml_MultiSection_FirstSectionHasStartOfSequence()
+    {
+        var result = Serializer.BuildHtml(TwoPhaseSequence(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 3);
+
+        Assert.Contains("Start of sequence", result, "First section should say 'Start of sequence'");
+    }
+
+    [TestMethod]
+    public void BuildHtml_MultiSection_LastSectionHasEndOfSequence()
+    {
+        var result = Serializer.BuildHtml(TwoPhaseSequence(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 3);
+
+        Assert.Contains("End of sequence", result, "Last section should say 'End of sequence'");
+    }
+
+    [TestMethod]
+    public void BuildHtml_MultiSection_BannersMentionContinuesFrom()
+    {
+        var result = Serializer.BuildHtml(TwoPhaseSequence(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 3);
+
+        Assert.Contains("Continues from", result, "Second section banner should say 'Continues from'");
+        Assert.Contains("Continues in", result, "First section banner should say 'Continues in'");
+    }
+
+    [TestMethod]
+    public void BuildHtml_MultiSection_MessageRangeInSectionHeader()
+    {
+        var result = Serializer.BuildHtml(TwoPhaseSequence(),
+            stackedActivationBars: true, autoNumber: true, maxParticipantsPerDiagram: 3);
+
+        Assert.Contains("Messages 1", result, "Section header should show message range starting at 1");
+        Assert.Contains("Messages 5", result, "Second section header should show range starting at 5");
+    }
+
+    [TestMethod]
+    public void BuildHtml_MultiSection_ParticipantCountInSectionHeader()
+    {
+        var result = Serializer.BuildHtml(TwoPhaseSequence(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 3);
+
+        Assert.Contains("participants", result, "Section header should show participant count");
+    }
+
+    [TestMethod]
+    public void BuildHtml_MultiSection_TocContainsPartLinks()
+    {
+        var result = Serializer.BuildHtml(TwoPhaseSequence(),
+            stackedActivationBars: false, autoNumber: false, maxParticipantsPerDiagram: 3);
+
+        Assert.Contains("Part 1", result, "TOC should contain Part 1 link");
+        Assert.Contains("Part 2", result, "TOC should contain Part 2 link");
+    }
+
+    [TestMethod]
+    public void BuildHtml_MultiSection_SectionsHavePartIds()
+    {
+        var result = Serializer.BuildHtml(TwoPhaseSequence(),
+            stackedActivationBars: false, autoNumber: false, maxParticipantsPerDiagram: 3);
+
+        Assert.Contains("id=\"part-1\"", result, "First section should have id='part-1'");
+        Assert.Contains("id=\"part-2\"", result, "Second section should have id='part-2'");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Sub-part segmentation
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private static CallSequence OversizedSingleCallSequence()
+    {
+        // One root call A→B with many nested calls each introducing unique participants
+        // B→C, B→D, B→E, B→F, B→G — forcing sub-part split at maxParticipants=4
+        return new CallSequence
+        {
+            Title = "BigCall",
+            Participants =
+            [
+                P("A","A"), P("B","B"), P("C","C"), P("D","D"),
+                P("E","E"), P("F","F"), P("G","G"),
+            ],
+            RootCalls =
+            [
+                new CallSequenceCallNode("A", "B", "BigEntry",
+                [
+                    Leaf("B", "C", "Sub1"),
+                    Leaf("B", "D", "Sub2"),
+                    Leaf("B", "E", "Sub3"),
+                    Leaf("B", "F", "Sub4"),
+                    Leaf("B", "G", "Sub5"),
+                ]),
+            ],
+        };
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_OversizedSingleCall_ProducesMultipleSections()
+    {
+        var result = Serializer.BuildMarkdown(OversizedSingleCallSequence(),
+            stackedActivationBars: false, autoNumber: false, maxParticipantsPerDiagram: 4);
+
+        // Should produce at least 2 sections (sub-parts)
+        var headingCount = result.Split('\n').Count(l => l.TrimStart().StartsWith("## Part"));
+        Assert.IsGreaterThan(1, headingCount, "Oversized single call should be split into sub-parts");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_OversizedSingleCall_BoundaryParticipantsRepeatAcrossSubParts()
+    {
+        var result = Serializer.BuildMarkdown(OversizedSingleCallSequence(),
+            stackedActivationBars: false, autoNumber: false, maxParticipantsPerDiagram: 4);
+
+        // B (the callee of the parent call) should appear in all sub-segments
+        int bDeclarationCount = result.Split('\n').Count(l => l.Trim().StartsWith("participant B"));
+        Assert.IsGreaterThan(1, bDeclarationCount, "Boundary participant B should appear in multiple sub-segments");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_OversizedSingleCall_SubPartNumbersUsedInHeadings()
+    {
+        var result = Serializer.BuildMarkdown(OversizedSingleCallSequence(),
+            stackedActivationBars: false, autoNumber: false, maxParticipantsPerDiagram: 4);
+
+        // Sub-parts should use A/B/C notation like "Part 1A", "Part 1B"
+        Assert.Contains("Part 1A", result, "First sub-part should be numbered 1A");
+        Assert.Contains("Part 1B", result, "Second sub-part should be numbered 1B");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_OversizedSingleCall_GlobalNumberingContinuesAcrossSubParts()
+    {
+        var result = Serializer.BuildMarkdown(OversizedSingleCallSequence(),
+            stackedActivationBars: false, autoNumber: true, maxParticipantsPerDiagram: 4);
+
+        var lines = result.Split('\n').Select(l => l.Trim()).ToArray();
+        var autonumberLines = lines.Where(l => l.StartsWith("autonumber")).ToArray();
+
+        Assert.IsGreaterThanOrEqualTo(2, autonumberLines.Length);
+
+        // Parse the second autonumber value — must be > 1
+        var secondParts = autonumberLines[1].Split(' ');
+        if (secondParts.Length >= 2 && int.TryParse(secondParts[1], out int secondStart))
+        {
+            Assert.IsGreaterThan(1, secondStart, "Sub-part B must not restart numbering at 1");
+        }
+    }
 }
