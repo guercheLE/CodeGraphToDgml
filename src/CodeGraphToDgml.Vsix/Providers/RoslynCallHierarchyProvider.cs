@@ -605,6 +605,13 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
             graph.UpsertNode(projectNode);
             graph.AddLink(new GraphLink(projectId, currentId, "Contains"));
+
+            if (!symbol.Locations.Any(l => l.IsInSource))
+            {
+                const string externalGroupId = "ExternalSymbols";
+                graph.UpsertNode(new GraphNode(externalGroupId, "External Symbols", "Externals", null, null, null));
+                graph.AddLink(new GraphLink(externalGroupId, projectId, "Contains"));
+            }
         }
     }
 
