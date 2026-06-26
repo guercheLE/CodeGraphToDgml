@@ -96,12 +96,21 @@ internal sealed class AllReferencesToDgmlOperationService
 
             targetDocument.ReplaceAllText(mergedDgml);
 
+            await progress.CompleteAsync("Code Graph to DGML: completed.").ConfigureAwait(true);
+
+            // Activate the DGML window AFTER the progress dialog is closed: the DGML renderer
+            // may take a noticeable amount of time on large graphs and must not stall the dialog.
             if (options.ActivateDgmlWindow)
             {
-                targetDocument.Activate();
+                try
+                {
+                    targetDocument.Activate();
+                }
+                catch (Exception ex)
+                {
+                    ActivityLog.TryLogError(nameof(AllReferencesToDgmlOperationService), $"Failed to activate DGML window: {ex}");
+                }
             }
-
-            await progress.CompleteAsync("Code Graph to DGML: completed.").ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {

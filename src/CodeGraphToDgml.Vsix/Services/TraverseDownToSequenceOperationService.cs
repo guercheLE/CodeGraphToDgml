@@ -105,14 +105,26 @@ internal sealed class TraverseDownToSequenceOperationService
                 if (htmlPath is not null) await _outputWindowLogger.WriteLineAsync($"HTML: {htmlPath}").ConfigureAwait(true);
             }
 
+            await progress.CompleteAsync("Code Graph to Sequence: completed.").ConfigureAwait(true);
+
             if (options.ActivateDgmlWindow)
             {
                 // Markdown: open inside Visual Studio for its built-in preview.
                 // HTML: open in default browser (VS cannot execute JS in its HTML editor).
+                // Open documents AFTER the progress dialog is closed: VS may spend a long time
+                // parsing or previewing a large Markdown file, and that must not stall the dialog.
                 if (mdPath is not null)
                 {
-                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(progress.Token);
-                    DgmlDocumentService.OpenDocumentSafe(_package, mdPath).Show();
+                    await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+                    try
+                    {
+                        DgmlDocumentService.OpenDocumentSafe(_package, mdPath).Show();
+                    }
+                    catch (Exception ex)
+                    {
+                        ActivityLog.TryLogError(nameof(TraverseDownToSequenceOperationService), $"Failed to open output file: {ex}");
+                        await _outputWindowLogger.WriteLineAsync($"Could not open output file: {ex.Message}").ConfigureAwait(true);
+                    }
                 }
 
                 if (htmlPath is not null)
@@ -120,8 +132,6 @@ internal sealed class TraverseDownToSequenceOperationService
                     OpenInDefaultBrowser(htmlPath);
                 }
             }
-
-            await progress.CompleteAsync("Code Graph to Sequence: completed.").ConfigureAwait(true);
         }
         catch (OperationCanceledException)
         {

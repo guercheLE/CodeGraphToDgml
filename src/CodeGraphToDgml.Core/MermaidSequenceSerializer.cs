@@ -119,7 +119,7 @@ public sealed class MermaidSequenceSerializer
         sb.AppendLine("</div>");
         sb.AppendLine("<script type=\"module\">");
         sb.AppendLine("import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';");
-        sb.AppendLine("mermaid.initialize({ startOnLoad: false, theme: 'default' });");
+        sb.AppendLine("mermaid.initialize({ startOnLoad: false, theme: 'default', maxTextSize: 500000 });");
         sb.AppendLine();
         sb.Append("const DIAGRAM_SOURCE = ").Append(jsSource).AppendLine(";");
         sb.AppendLine();

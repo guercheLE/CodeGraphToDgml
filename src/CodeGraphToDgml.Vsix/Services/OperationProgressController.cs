@@ -4,7 +4,7 @@ using Microsoft.VisualStudio.Shell.Interop;
 
 namespace CodeGraphToDgml.Vsix;
 
-internal sealed class OperationProgressController : IDisposable
+internal sealed class OperationProgressController : IDisposable, IVsThreadedWaitDialogCallback
 {
     private readonly ToolkitPackage _package;
     private IVsThreadedWaitDialog4? _waitDialog;
@@ -54,6 +54,16 @@ internal sealed class OperationProgressController : IDisposable
         await CloseFormAsync().ConfigureAwait(true);
     }
 
+    void IVsThreadedWaitDialogCallback.OnCanceled()
+    {
+        try
+        {
+            if (!_cancellationTokenSource.IsCancellationRequested)
+                _cancellationTokenSource.Cancel();
+        }
+        catch (ObjectDisposedException) { }
+    }
+
     public void Dispose()
     {
         if (!_completed && !_cancellationTokenSource.IsCancellationRequested)
@@ -77,18 +87,24 @@ internal sealed class OperationProgressController : IDisposable
             {
                 dialogFactory.CreateInstance(out var waitDialog);
                 _waitDialog = waitDialog as IVsThreadedWaitDialog4;
-                _waitDialog?.StartWaitDialog("Code Graph to DGML", message, null, null, "Cancelling...", 0, true, true);
+                if (waitDialog is IVsThreadedWaitDialog3 dialog3)
+                {
+                    dialog3.StartWaitDialogWithCallback(
+                        "Code Graph to DGML", message, null, null, "Cancelling...",
+                        fIsCancelable: true, iDelayToShowDialog: 0, fShowProgress: true,
+                        iTotalSteps: 0, iCurrentStep: 0, pCallback: this);
+                }
+                else
+                {
+                    waitDialog?.StartWaitDialog("Code Graph to DGML", message, null, null, "Cancelling...", 0, true, true);
+                }
             }
             _dialogStarted = true;
         }
 
         if (_waitDialog != null)
         {
-            _waitDialog.UpdateProgress(message, null, null, 0, 0, false, out var isCancelled);
-            if (isCancelled && !_cancellationTokenSource.IsCancellationRequested)
-            {
-                _cancellationTokenSource.Cancel();
-            }
+            _waitDialog.UpdateProgress(message, null, null, 0, 0, false, out _);
         }
 
         var statusBar = await _package.GetServiceAsync(typeof(SVsStatusbar)).ConfigureAwait(true) as IVsStatusbar;
