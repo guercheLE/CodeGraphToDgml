@@ -128,6 +128,12 @@ internal class General : BaseOptionModel<General>
     [DefaultValue(false)]
     public bool SequenceDiagramAutoNumber { get; set; }
 
+    [Category("Sequence Diagram")]
+    [DisplayName("Max participants per diagram")]
+    [Description("When greater than zero, large diagrams are split into multiple sections by depth level, each containing at most this many participants. Set to 0 to disable splitting.")]
+    [DefaultValue(50)]
+    public int SequenceDiagramMaxParticipantsPerDiagram { get; set; } = 50;
+
     [Category("UI")]
     [DisplayName("Activate result document")]
     [Description("When enabled, the DGML document is brought to the front after it is updated.")]
