@@ -4,6 +4,13 @@ using CodeGraphToDgml.Core;
 
 namespace CodeGraphToDgml.Vsix;
 
+public enum SequenceDiagramOutputFormat
+{
+    Markdown,
+    Html,
+    Both,
+}
+
 public enum DgmlDocumentOpenBehavior
 {
     AlwaysAsk,
@@ -101,6 +108,13 @@ internal class General : BaseOptionModel<General>
     [DefaultValue(GraphUpdateMode.Append)]
     [TypeConverter(typeof(EnumConverter))]
     public GraphUpdateMode UpdateMode { get; set; } = GraphUpdateMode.Append;
+
+    [Category("Sequence Diagram")]
+    [DisplayName("Output format")]
+    [Description("Controls which file format(s) are generated when using Traverse Down to Sequence. Markdown can be previewed directly in Visual Studio; Html opens in the default browser with zoom and scroll support.")]
+    [DefaultValue(SequenceDiagramOutputFormat.Markdown)]
+    [TypeConverter(typeof(EnumConverter))]
+    public SequenceDiagramOutputFormat SequenceDiagramOutputFormat { get; set; } = SequenceDiagramOutputFormat.Markdown;
 
     [Category("UI")]
     [DisplayName("Activate result document")]

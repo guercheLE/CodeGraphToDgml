@@ -1032,6 +1032,155 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         }
     }
 
+    public async Task<CallSequence> TraverseDownToSequenceAsync(
+        HierarchySubject subject,
+        TraversalOptions options,
+        IProgress<TraversalProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        if (subject.Payload is not RoslynHierarchySubject roslynSubject)
+            throw new InvalidOperationException("Unexpected hierarchy subject payload.");
+
+        var normalizedOptions = options.Normalize();
+        var participantTable = new ParticipantTable();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var nodeCount = 0;
+
+        var rootSymbol = NormalizeSymbol(roslynSubject.Symbol)!;
+        var rootParticipantId = GetParticipantId(rootSymbol, participantTable);
+
+        var rootCalls = await BuildCallsAsync(rootSymbol, rootParticipantId, 0).ConfigureAwait(false);
+
+        return new CallSequence
+        {
+            Title = subject.DisplayName,
+            Participants = participantTable.Participants,
+            RootCalls = rootCalls,
+        };
+
+        async Task<IReadOnlyList<CallSequenceCallNode>> BuildCallsAsync(
+            ISymbol caller,
+            string callerParticipantId,
+            int depth)
+        {
+            if (depth >= normalizedOptions.MaxDepth)
+                return Array.Empty<CallSequenceCallNode>();
+
+            progress?.Report(new TraversalProgress("Traversing callees", depth, nodeCount, caller.ToDisplayString()));
+
+            var callees = await FindCalleesAsync(caller, roslynSubject.Solution, cancellationToken).ConfigureAwait(false);
+            var nodes = new List<CallSequenceCallNode>();
+
+            foreach (var callee in callees)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var normalized = NormalizeSymbol(callee);
+                if (normalized is null || !IsAllowed(normalized, normalizedOptions))
+                    continue;
+
+                nodeCount++;
+                if (nodeCount >= normalizedOptions.MaxNodeCount)
+                    break;
+
+                var calleeParticipantId = GetParticipantId(normalized, participantTable);
+                var calleeId = GetStableId(normalized);
+
+                IReadOnlyList<CallSequenceCallNode> nested;
+                if (visited.Add(calleeId))
+                    nested = await BuildCallsAsync(normalized, calleeParticipantId, depth + 1).ConfigureAwait(false);
+                else
+                    nested = Array.Empty<CallSequenceCallNode>();
+
+                nodes.Add(new CallSequenceCallNode(
+                    callerParticipantId,
+                    calleeParticipantId,
+                    GetNodeLabel(normalized),
+                    nested));
+            }
+
+            return nodes;
+        }
+    }
+
+    private static string GetParticipantId(ISymbol symbol, ParticipantTable table)
+    {
+        var containingType = symbol.ContainingType;
+        if (containingType is not null)
+            return table.GetOrAdd(containingType);
+
+        // Top-level statements or module-level code: use assembly name as fallback.
+        var assemblyName = symbol.ContainingAssembly?.Name ?? "?";
+        return table.GetOrAddRaw(assemblyName);
+    }
+
+    private sealed class ParticipantTable
+    {
+        private readonly Dictionary<string, string> _symbolIdToMermaidId = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, int> _baseNameCount = new(StringComparer.OrdinalIgnoreCase);
+        private readonly List<CallSequenceParticipant> _participants = new();
+
+        public IReadOnlyList<CallSequenceParticipant> Participants => _participants;
+
+        public string GetOrAdd(INamedTypeSymbol type)
+        {
+            var symbolId = type.GetDocumentationCommentId() ?? type.ToDisplayString();
+            if (_symbolIdToMermaidId.TryGetValue(symbolId, out var existing))
+                return existing;
+
+            var mermaidId = AllocateId(type.Name, symbolId);
+            _participants.Add(new CallSequenceParticipant(mermaidId, type.Name));
+            return mermaidId;
+        }
+
+        public string GetOrAddRaw(string name)
+        {
+            if (_symbolIdToMermaidId.TryGetValue(name, out var existing))
+                return existing;
+
+            var mermaidId = AllocateId(name, name);
+            _participants.Add(new CallSequenceParticipant(mermaidId, name));
+            return mermaidId;
+        }
+
+        private string AllocateId(string typeName, string symbolKey)
+        {
+            var baseName = SanitizeName(typeName);
+            if (string.IsNullOrEmpty(baseName)) baseName = "Unknown";
+
+            string mermaidId;
+            if (!_baseNameCount.TryGetValue(baseName, out var count))
+            {
+                _baseNameCount[baseName] = 1;
+                mermaidId = baseName;
+            }
+            else
+            {
+                _baseNameCount[baseName] = count + 1;
+                mermaidId = $"{baseName}_{count}";
+            }
+
+            _symbolIdToMermaidId[symbolKey] = mermaidId;
+            return mermaidId;
+        }
+
+        private static string SanitizeName(string name)
+        {
+            var sb = new System.Text.StringBuilder();
+            foreach (var c in name)
+            {
+                if (char.IsLetterOrDigit(c) || c == '_')
+                    sb.Append(c);
+                else
+                    sb.Append('_');
+            }
+
+            var result = sb.ToString().TrimStart('_');
+            if (result.Length == 0) return "Unknown";
+            return char.IsDigit(result[0]) ? "_" + result : result;
+        }
+    }
+
     private sealed class RoslynHierarchySubject
     {
         public RoslynHierarchySubject(ISymbol symbol, RoslynSolution solution)

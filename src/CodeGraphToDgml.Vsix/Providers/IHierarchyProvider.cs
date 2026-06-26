@@ -21,4 +21,10 @@ internal interface IHierarchyProvider
         TraversalOptions options,
         IProgress<TraversalProgress>? progress,
         CancellationToken cancellationToken);
+
+    Task<CallSequence> TraverseDownToSequenceAsync(
+        HierarchySubject subject,
+        TraversalOptions options,
+        IProgress<TraversalProgress>? progress,
+        CancellationToken cancellationToken);
 }

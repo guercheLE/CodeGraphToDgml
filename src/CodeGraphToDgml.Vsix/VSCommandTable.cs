@@ -14,5 +14,6 @@ internal sealed partial class PackageIds
     public const int TraverseUpToDgmlCommand = 0x0100;
     public const int AllReferencesToDgmlCommand = 0x0101;
     public const int TraverseDownToDgmlCommand = 0x0102;
+    public const int TraverseDownToSequenceCommand = 0x0103;
     public const int EditorContextMenuGroup = 0x1020;
 }

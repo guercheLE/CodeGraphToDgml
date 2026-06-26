@@ -19,6 +19,7 @@ public sealed class CodeGraphToDgmlPackage : ToolkitPackage
             TraverseUpToDgmlOperationService.Initialize(this);
             TraverseDownToDgmlOperationService.Initialize(this);
             AllReferencesToDgmlOperationService.Initialize(this);
+            TraverseDownToSequenceOperationService.Initialize(this);
             ActivityLog.TryLogInformation(nameof(CodeGraphToDgmlPackage), "InitializeAsync completed successfully");
         }
         catch (Exception ex)
