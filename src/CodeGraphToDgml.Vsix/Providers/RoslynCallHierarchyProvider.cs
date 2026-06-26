@@ -482,12 +482,15 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                     continue;
                 }
 
-                if (seen.Add(normalized))
-                {
+                bool isNewInvocation = seen.Add(normalized);
+                if (isNewInvocation)
                     callees.Add(normalized);
-                }
 
-                // Recursively resolve chained member accesses (e.g., obj.Property.Method())
+                // Collect chained member accesses (e.g., obj.Property.Method()).
+                // Walk from the invocation's receiver inward; the walk yields accesses
+                // in innermost-first order, so we reverse to get execution order and
+                // insert them before the main invocation so the diagram shows them first.
+                var chainedBefore = new List<ISymbol>();
                 var expr = invocation.Expression;
                 while (expr is Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax memberAccess)
                 {
@@ -498,10 +501,19 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                     {
                         if (!SymbolEqualityComparer.Default.Equals(memberNormalized, NormalizeSymbol(symbol)) && seen.Add(memberNormalized))
                         {
-                            callees.Add(memberNormalized);
+                            chainedBefore.Add(memberNormalized);
                         }
                     }
                     expr = memberAccess.Expression;
+                }
+
+                if (chainedBefore.Count > 0)
+                {
+                    chainedBefore.Reverse();
+                    if (isNewInvocation)
+                        callees.InsertRange(callees.Count - 1, chainedBefore);
+                    else
+                        callees.AddRange(chainedBefore);
                 }
             }
         }

@@ -179,6 +179,7 @@ public sealed class MermaidSequenceSerializer
         public int EndMessage { get; set; }
         public List<string> ParticipantIds { get; set; } = new List<string>();
         public List<string> BoundaryFromPrev { get; set; } = new List<string>();
+        public List<string> SplitBoundary { get; set; } = new List<string>();
         public string? PrevPart { get; set; }
         public string? NextPart { get; set; }
         public string? PrevTitle { get; set; }
@@ -255,6 +256,19 @@ public sealed class MermaidSequenceSerializer
 
             bool hasSubParts = subSegs.Count > 1;
 
+            // When a single oversized call is split into sub-parts, its caller and callee
+            // are still "in flight" across every sub-segment — record them so the renderer
+            // can emit activate/deactivate to show the active execution context.
+            List<string>? splitBoundary = null;
+            if (hasSubParts && phase.Count == 1)
+            {
+                splitBoundary = new List<string>
+                {
+                    phase[0].CallerParticipantId,
+                    phase[0].CalleeParticipantId,
+                };
+            }
+
             for (int subIdx = 0; subIdx < subSegs.Count; subIdx++)
             {
                 var (calls, parts) = subSegs[subIdx];
@@ -271,6 +285,7 @@ public sealed class MermaidSequenceSerializer
                     StartMessage = msgCounter,
                     EndMessage = arrowCount > 0 ? msgCounter + arrowCount - 1 : msgCounter,
                     ParticipantIds = new List<string>(parts),
+                    SplitBoundary = splitBoundary ?? new List<string>(),
                     VirtualRootCalls = calls,
                 };
 
@@ -495,8 +510,20 @@ public sealed class MermaidSequenceSerializer
         if (segSet.Count > 0 && plan.VirtualRootCalls.Count > 0)
             sb.AppendLine();
 
+        if (stackedBars && plan.SplitBoundary.Count > 0)
+        {
+            foreach (var p in plan.SplitBoundary)
+                sb.Append("    activate ").AppendLine(p);
+        }
+
         foreach (var call in plan.VirtualRootCalls)
             EmitCall(sb, call, stackedBars);
+
+        if (stackedBars && plan.SplitBoundary.Count > 0)
+        {
+            for (int i = plan.SplitBoundary.Count - 1; i >= 0; i--)
+                sb.Append("    deactivate ").AppendLine(plan.SplitBoundary[i]);
+        }
 
         while (sb.Length > 0 && (sb[sb.Length - 1] == '\r' || sb[sb.Length - 1] == '\n'))
             sb.Length--;

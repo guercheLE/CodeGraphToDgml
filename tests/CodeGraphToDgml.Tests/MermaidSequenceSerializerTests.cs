@@ -896,4 +896,50 @@ public sealed class MermaidSequenceSerializerTests
             Assert.IsGreaterThan(1, secondStart, "Sub-part B must not restart numbering at 1");
         }
     }
+
+    [TestMethod]
+    public void BuildMarkdown_OversizedSingleCall_StackedBarsOn_BoundaryParticipantsHaveActivationBars()
+    {
+        // With stacked bars, each sub-part must emit activate/deactivate for the
+        // caller (A) and callee (B) of the oversized parent call so their lifelines
+        // show active execution bars across all sub-segments.
+        var result = Serializer.BuildMarkdown(OversizedSingleCallSequence(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 4);
+
+        var lines = result.Split('\n').Select(l => l.Trim()).ToArray();
+
+        // Every sub-part should contain both activate A and activate B
+        Assert.Contains("activate A", result, "Caller A must be activated in sub-parts");
+        Assert.Contains("activate B", result, "Callee B must be activated in sub-parts");
+        Assert.Contains("deactivate A", result, "Caller A must be deactivated in sub-parts");
+        Assert.Contains("deactivate B", result, "Callee B must be deactivated in sub-parts");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_OversizedSingleCall_StackedBarsOff_NoBoundaryActivationLines()
+    {
+        // When stacked bars are off, no activate/deactivate lines should be emitted
+        // for the split boundary (or at all).
+        var result = Serializer.BuildMarkdown(OversizedSingleCallSequence(),
+            stackedActivationBars: false, autoNumber: false, maxParticipantsPerDiagram: 4);
+
+        Assert.DoesNotContain("activate ", result, "No activate lines when stacked bars are off");
+        Assert.DoesNotContain("deactivate ", result, "No deactivate lines when stacked bars are off");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_OversizedSingleCall_BoundaryActivateBeforeFirstCall()
+    {
+        // The activate lines for the split boundary must appear before the first call
+        // arrow in each sub-part so they form the outer activation frame.
+        var result = Serializer.BuildMarkdown(OversizedSingleCallSequence(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 4);
+
+        int activateIdx = result.IndexOf("activate A", StringComparison.Ordinal);
+        int firstCallIdx = result.IndexOf("->>+", StringComparison.Ordinal);
+
+        Assert.IsGreaterThanOrEqualTo(0, activateIdx, "Missing 'activate A'");
+        Assert.IsGreaterThanOrEqualTo(0, firstCallIdx, "Missing first call arrow");
+        Assert.IsLessThan(firstCallIdx, activateIdx, "'activate A' must precede the first call arrow");
+    }
 }
