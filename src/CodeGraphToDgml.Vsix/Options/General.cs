@@ -131,8 +131,8 @@ internal class General : BaseOptionModel<General>
     [Category("Sequence Diagram")]
     [DisplayName("Max participants per diagram")]
     [Description("When greater than zero, large diagrams are split into multiple sections by depth level, each containing at most this many participants. Set to 0 to disable splitting.")]
-    [DefaultValue(50)]
-    public int SequenceDiagramMaxParticipantsPerDiagram { get; set; } = 50;
+    [DefaultValue(15)]
+    public int SequenceDiagramMaxParticipantsPerDiagram { get; set; } = 15;
 
     [Category("UI")]
     [DisplayName("Activate result document")]
