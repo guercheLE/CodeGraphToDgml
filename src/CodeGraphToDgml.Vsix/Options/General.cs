@@ -122,6 +122,12 @@ internal class General : BaseOptionModel<General>
     [DefaultValue(false)]
     public bool SequenceDiagramStackedActivationBars { get; set; }
 
+    [Category("Sequence Diagram")]
+    [DisplayName("Auto-number calls")]
+    [Description("When enabled, adds the autonumber directive to the generated Mermaid sequence diagram, annotating each message arrow with a sequential call number.")]
+    [DefaultValue(false)]
+    public bool SequenceDiagramAutoNumber { get; set; }
+
     [Category("UI")]
     [DisplayName("Activate result document")]
     [Description("When enabled, the DGML document is brought to the front after it is updated.")]

@@ -460,57 +460,68 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 continue;
             }
 
-            foreach (var descendant in syntaxNode.DescendantNodes())
+            foreach (var invocation in GetInvocationsPostOrder(syntaxNode))
             {
-                // Only process invocation expressions for chained call analysis
-                if (descendant is Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax invocation)
+                var symbolInfo = semanticModel.GetSymbolInfo(invocation, cancellationToken);
+                var resolved = symbolInfo.Symbol ?? (symbolInfo.CandidateSymbols.Length == 1 ? symbolInfo.CandidateSymbols[0] : null);
+
+                if (resolved is null)
                 {
-                    var symbolInfo = semanticModel.GetSymbolInfo(invocation, cancellationToken);
-                    var resolved = symbolInfo.Symbol ?? (symbolInfo.CandidateSymbols.Length == 1 ? symbolInfo.CandidateSymbols[0] : null);
+                    continue;
+                }
 
-                    if (resolved is null)
-                    {
-                        continue;
-                    }
+                var normalized = NormalizeSymbol(resolved);
+                if (normalized is null || !IsSupportedCalleeSymbol(normalized))
+                {
+                    continue;
+                }
 
-                    var normalized = NormalizeSymbol(resolved);
-                    if (normalized is null || !IsSupportedCalleeSymbol(normalized))
-                    {
-                        continue;
-                    }
+                // Skip self-references.
+                if (SymbolEqualityComparer.Default.Equals(normalized, NormalizeSymbol(symbol)))
+                {
+                    continue;
+                }
 
-                    // Skip self-references.
-                    if (SymbolEqualityComparer.Default.Equals(normalized, NormalizeSymbol(symbol)))
-                    {
-                        continue;
-                    }
+                if (seen.Add(normalized))
+                {
+                    callees.Add(normalized);
+                }
 
-                    if (seen.Add(normalized))
+                // Recursively resolve chained member accesses (e.g., obj.Property.Method())
+                var expr = invocation.Expression;
+                while (expr is Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax memberAccess)
+                {
+                    var memberSymbolInfo = semanticModel.GetSymbolInfo(memberAccess, cancellationToken);
+                    var memberResolved = memberSymbolInfo.Symbol ?? (memberSymbolInfo.CandidateSymbols.Length == 1 ? memberSymbolInfo.CandidateSymbols[0] : null);
+                    var memberNormalized = NormalizeSymbol(memberResolved);
+                    if (memberNormalized != null && IsSupportedCalleeSymbol(memberNormalized))
                     {
-                        callees.Add(normalized);
-                    }
-
-                    // Recursively resolve chained member accesses (e.g., obj.Property.Method())
-                    var expr = invocation.Expression;
-                    while (expr is Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax memberAccess)
-                    {
-                        var memberSymbolInfo = semanticModel.GetSymbolInfo(memberAccess, cancellationToken);
-                        var memberResolved = memberSymbolInfo.Symbol ?? (memberSymbolInfo.CandidateSymbols.Length == 1 ? memberSymbolInfo.CandidateSymbols[0] : null);
-                        var memberNormalized = NormalizeSymbol(memberResolved);
-                        if (memberNormalized != null && IsSupportedCalleeSymbol(memberNormalized))
+                        if (!SymbolEqualityComparer.Default.Equals(memberNormalized, NormalizeSymbol(symbol)) && seen.Add(memberNormalized))
                         {
-                            if (!SymbolEqualityComparer.Default.Equals(memberNormalized, NormalizeSymbol(symbol)) && seen.Add(memberNormalized))
-                            {
-                                callees.Add(memberNormalized);
-                            }
+                            callees.Add(memberNormalized);
                         }
-                        expr = memberAccess.Expression;
                     }
+                    expr = memberAccess.Expression;
                 }
             }
         }
 
         return callees;
+    }
+
+    /// <summary>
+    /// Yields every <see cref="InvocationExpressionSyntax"/> reachable from <paramref name="root"/>
+    /// in post-order (children before parent). This matches C# argument-evaluation order: an
+    /// invocation used as an argument is yielded before the outer invocation that receives it.
+    /// </summary>
+    private static IEnumerable<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax> GetInvocationsPostOrder(SyntaxNode root)
+    {
+        foreach (var child in root.ChildNodes())
+            foreach (var inv in GetInvocationsPostOrder(child))
+                yield return inv;
+
+        if (root is Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax invocation)
+            yield return invocation;
     }
 
     private static bool IsSupportedCalleeSymbol(ISymbol symbol)
@@ -1087,10 +1098,19 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 var calleeId = GetStableId(normalized);
 
                 IReadOnlyList<CallSequenceCallNode> nested;
-                if (visited.Add(calleeId))
+                if (normalized.ContainingType?.TypeKind == TypeKind.Interface)
+                {
+                    visited.Add(calleeId);
+                    nested = await BuildInterfaceDispatchCallsAsync(normalized, calleeParticipantId, depth).ConfigureAwait(false);
+                }
+                else if (visited.Add(calleeId))
+                {
                     nested = await BuildCallsAsync(normalized, calleeParticipantId, depth + 1).ConfigureAwait(false);
+                }
                 else
+                {
                     nested = [];
+                }
 
                 nodes.Add(new CallSequenceCallNode(
                     callerParticipantId,
@@ -1100,6 +1120,40 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             }
 
             return nodes;
+        }
+
+        async Task<IReadOnlyList<CallSequenceCallNode>> BuildInterfaceDispatchCallsAsync(
+            ISymbol interfaceMember,
+            string interfaceParticipantId,
+            int depth)
+        {
+            var implementations = await SymbolFinder.FindImplementationsAsync(
+                interfaceMember, roslynSubject.Solution, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            var dispatchNodes = new List<CallSequenceCallNode>();
+            foreach (var impl in implementations)
+            {
+                var normImpl = NormalizeSymbol(impl);
+                if (normImpl is null || !IsAllowed(normImpl, normalizedOptions))
+                    continue;
+
+                nodeCount++;
+                if (nodeCount >= normalizedOptions.MaxNodeCount)
+                    break;
+
+                var implParticipantId = GetParticipantId(normImpl, participantTable);
+                var implId = GetStableId(normImpl);
+
+                IReadOnlyList<CallSequenceCallNode> implBody;
+                if (visited.Add(implId))
+                    implBody = await BuildCallsAsync(normImpl, implParticipantId, depth + 1).ConfigureAwait(false);
+                else
+                    implBody = [];
+
+                dispatchNodes.Add(new CallSequenceCallNode(interfaceParticipantId, implParticipantId, GetNodeLabel(normImpl), implBody));
+            }
+
+            return dispatchNodes;
         }
     }
 

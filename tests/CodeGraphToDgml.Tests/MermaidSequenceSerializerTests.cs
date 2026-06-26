@@ -81,7 +81,7 @@ public sealed class MermaidSequenceSerializerTests
     // ──────────────────────────────────────────────────────────────────────────
 
     [TestMethod]
-    public void Serialize_LeafCall_UsesSimpleArrow()
+    public void Serialize_LeafCall_StackedBarsOff_UsesSimpleArrow()
     {
         var sequence = new CallSequence
         {
@@ -89,10 +89,24 @@ public sealed class MermaidSequenceSerializerTests
             RootCalls = [Leaf("A", "B", "Foo")],
         };
 
-        var result = Serializer.Serialize(sequence);
+        var result = Serializer.Serialize(sequence, stackedActivationBars: false);
         Assert.Contains("A->>B: Foo", result);
-        Assert.DoesNotContain("->>+", result, "Leaf call must not activate");
-        Assert.DoesNotContain("-->>-", result, "Leaf call must not deactivate");
+        Assert.DoesNotContain("->>+", result, "Leaf call must not activate when stacked bars are off");
+        Assert.DoesNotContain("-->>-", result, "Leaf call must not deactivate when stacked bars are off");
+    }
+
+    [TestMethod]
+    public void Serialize_LeafCall_StackedBarsOn_UsesActivationArrows()
+    {
+        var sequence = new CallSequence
+        {
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", "Foo")],
+        };
+
+        var result = Serializer.Serialize(sequence, stackedActivationBars: true);
+        Assert.Contains("A->>+B: Foo", result);
+        Assert.Contains("B-->>-A: ", result);
     }
 
     [TestMethod]
@@ -101,7 +115,8 @@ public sealed class MermaidSequenceSerializerTests
         var result = Serializer.Serialize(LinearChain());
 
         Assert.Contains("ClassA->>+ClassB: DoB", result);
-        Assert.Contains("ClassB->>ClassC: DoC", result);
+        Assert.Contains("ClassB->>+ClassC: DoC", result);
+        Assert.Contains("ClassC-->>-ClassB: ", result);
         Assert.Contains("ClassB-->>-ClassA: ", result);
     }
 
@@ -126,7 +141,8 @@ public sealed class MermaidSequenceSerializerTests
         };
 
         var result = Serializer.Serialize(sequence);
-        Assert.Contains("MyClass->>MyClass: Helper", result);
+        Assert.Contains("MyClass->>+MyClass: Helper", result);
+        Assert.Contains("MyClass-->>-MyClass: ", result);
     }
 
     [TestMethod]
@@ -164,7 +180,8 @@ public sealed class MermaidSequenceSerializerTests
 
         var result = Serializer.Serialize(sequence, stackedActivationBars: true);
         Assert.Contains("A->>+A: SelfWithNested", result);
-        Assert.Contains("A->>B: Inner", result);
+        Assert.Contains("A->>+B: Inner", result);
+        Assert.Contains("B-->>-A: ", result);
         Assert.Contains("A-->>-A: ", result);
     }
 
@@ -179,11 +196,13 @@ public sealed class MermaidSequenceSerializerTests
         var lines = result.Split('\n').Select(l => l.Trim()).ToArray();
 
         int callB = Array.FindIndex(lines, l => l.StartsWith("ClassA->>+ClassB"));
-        int callC = Array.FindIndex(lines, l => l.StartsWith("ClassB->>ClassC"));
+        int callC = Array.FindIndex(lines, l => l.StartsWith("ClassB->>+ClassC"));
+        int retB  = Array.FindIndex(lines, l => l.StartsWith("ClassC-->>-ClassB"));
         int retA  = Array.FindIndex(lines, l => l.StartsWith("ClassB-->>-ClassA"));
 
         Assert.IsLessThan(callC, callB, "Call to B should precede call to C");
-        Assert.IsLessThan(retA, callC,  "Call to C should precede deactivation of B→A");
+        Assert.IsLessThan(retB, callC,  "Call to C should precede deactivation of C→B");
+        Assert.IsLessThan(retA, retB,   "Deactivation of C→B should precede deactivation of B→A");
     }
 
     [TestMethod]
@@ -199,7 +218,7 @@ public sealed class MermaidSequenceSerializerTests
             ],
         };
 
-        var result = Serializer.Serialize(sequence);
+        var result = Serializer.Serialize(sequence, stackedActivationBars: false);
         Assert.Contains("A->>B: Foo", result);
         Assert.Contains("A->>C: Bar", result);
     }
@@ -242,20 +261,23 @@ public sealed class MermaidSequenceSerializerTests
 
         int callB = Array.FindIndex(lines, l => l.StartsWith("A->>+B"));
         int callC = Array.FindIndex(lines, l => l.StartsWith("B->>+C"));
-        int callD = Array.FindIndex(lines, l => l.StartsWith("C->>D"));
+        int callD = Array.FindIndex(lines, l => l.StartsWith("C->>+D"));
+        int retC  = Array.FindIndex(lines, l => l.StartsWith("D-->>-C"));
         int retB  = Array.FindIndex(lines, l => l.StartsWith("C-->>-B"));
         int retA  = Array.FindIndex(lines, l => l.StartsWith("B-->>-A"));
 
         Assert.IsGreaterThanOrEqualTo(0, callB, "Missing A->>+B");
         Assert.IsGreaterThanOrEqualTo(0, callC, "Missing B->>+C");
-        Assert.IsGreaterThanOrEqualTo(0, callD, "Missing C->>D (leaf, no +)");
+        Assert.IsGreaterThanOrEqualTo(0, callD, "Missing C->>+D");
+        Assert.IsGreaterThanOrEqualTo(0, retC, "Missing D-->>-C");
         Assert.IsGreaterThanOrEqualTo(0, retB, "Missing C-->>-B");
         Assert.IsGreaterThanOrEqualTo(0, retA, "Missing B-->>-A");
 
         Assert.IsLessThan(callC, callB, "A→B must precede B→C");
         Assert.IsLessThan(callD, callC, "B→C must precede C→D");
-        Assert.IsLessThan(retB, callD,  "C→D must precede deactivation of C");
-        Assert.IsLessThan(retA, retB,  "C deactivation must precede B deactivation");
+        Assert.IsLessThan(retC, callD,  "C→D must precede deactivation of D");
+        Assert.IsLessThan(retB, retC,   "D deactivation must precede C deactivation");
+        Assert.IsLessThan(retA, retB,   "C deactivation must precede B deactivation");
     }
 
     [TestMethod]
@@ -378,7 +400,7 @@ public sealed class MermaidSequenceSerializerTests
         var result = Serializer.BuildMarkdown(sequence);
         int fenceOpen = result.IndexOf("```mermaid");
         int fenceClose = result.LastIndexOf("```");
-        int callLine  = result.IndexOf("A->>B: Go");
+        int callLine  = result.IndexOf("A->>+B: Go");
 
         Assert.IsGreaterThan(fenceOpen, callLine, "Call line must be inside the opening fence");
         Assert.IsLessThan(fenceClose, callLine, "Call line must be before the closing fence");
@@ -557,6 +579,30 @@ public sealed class MermaidSequenceSerializerTests
         // Newlines must be encoded as \n, not embedded literally
         Assert.DoesNotContain('\n', jsString, "Literal newlines in JS string literal are invalid");
         Assert.Contains("\\n", jsString, "Newlines must be encoded as \\n");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Serialize — autonumber
+    // ──────────────────────────────────────────────────────────────────────────
+
+    [TestMethod]
+    public void Serialize_AutoNumberOff_NoDirective()
+    {
+        var result = Serializer.Serialize(LinearChain(), autoNumber: false);
+        Assert.DoesNotContain("autonumber", result, "autonumber directive must not appear when disabled");
+    }
+
+    [TestMethod]
+    public void Serialize_AutoNumberOn_InsertsDirectiveAfterHeader()
+    {
+        var result = Serializer.Serialize(LinearChain(), autoNumber: true);
+        Assert.Contains("autonumber", result);
+        var lines = result.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).ToArray();
+        int header    = Array.FindIndex(lines, l => l == "sequenceDiagram");
+        int directive = Array.FindIndex(lines, l => l == "autonumber");
+        Assert.IsGreaterThanOrEqualTo(0, header, "Missing sequenceDiagram header");
+        Assert.IsGreaterThanOrEqualTo(0, directive, "Missing autonumber directive");
+        Assert.IsLessThan(directive, header, "autonumber must follow sequenceDiagram");
     }
 
     // ──────────────────────────────────────────────────────────────────────────

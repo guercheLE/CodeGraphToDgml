@@ -4,10 +4,12 @@ namespace CodeGraphToDgml.Core;
 
 public sealed class MermaidSequenceSerializer
 {
-    public string Serialize(CallSequence sequence, bool stackedActivationBars = true)
+    public string Serialize(CallSequence sequence, bool stackedActivationBars = true, bool autoNumber = false)
     {
         var sb = new StringBuilder();
         sb.AppendLine("sequenceDiagram");
+        if (autoNumber)
+            sb.AppendLine("    autonumber");
 
         foreach (var p in sequence.Participants)
         {
@@ -34,9 +36,8 @@ public sealed class MermaidSequenceSerializer
         var from = call.CallerParticipantId;
         var to = call.CalleeParticipantId;
         var label = EscapeLabel(call.MessageLabel);
-        var hasNested = call.NestedCalls.Count > 0;
 
-        if (hasNested && stackedActivationBars)
+        if (stackedActivationBars)
         {
             sb.Append("    ").Append(from).Append("->>+").Append(to).Append(": ").AppendLine(label);
             foreach (var nested in call.NestedCalls)
@@ -58,20 +59,20 @@ public sealed class MermaidSequenceSerializer
             .Replace(">", "#gt;")
             .Replace("&", "#amp;");
 
-    public string BuildMarkdown(CallSequence sequence, bool stackedActivationBars = true)
+    public string BuildMarkdown(CallSequence sequence, bool stackedActivationBars = true, bool autoNumber = false)
     {
         var sb = new StringBuilder();
         sb.Append("# Sequence: ").AppendLine(sequence.Title);
         sb.AppendLine();
         sb.AppendLine("```mermaid");
-        sb.AppendLine(Serialize(sequence, stackedActivationBars));
+        sb.AppendLine(Serialize(sequence, stackedActivationBars, autoNumber));
         sb.AppendLine("```");
         return sb.ToString();
     }
 
-    public string BuildHtml(CallSequence sequence, bool stackedActivationBars = true)
+    public string BuildHtml(CallSequence sequence, bool stackedActivationBars = true, bool autoNumber = false)
     {
-        var mermaid = Serialize(sequence, stackedActivationBars);
+        var mermaid = Serialize(sequence, stackedActivationBars, autoNumber);
         var jsSource = ToJsString(mermaid);
         var htmlTitle = EscapeHtml(sequence.Title);
 
