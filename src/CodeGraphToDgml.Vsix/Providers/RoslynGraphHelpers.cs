@@ -116,6 +116,13 @@ internal static class RoslynGraphHelpers
             {
                 graph.AddLink(new GraphLink(projectId, childId, "Contains"));
             }
+
+            if (!symbol.Locations.Any(l => l.IsInSource))
+            {
+                const string externalGroupId = "ExternalSymbols";
+                graph.UpsertNode(new GraphNode(externalGroupId, "External Symbols", "Externals", null, null, null));
+                graph.AddLink(new GraphLink(externalGroupId, projectId, "Contains"));
+            }
         }
     }
 
@@ -129,7 +136,10 @@ internal static class RoslynGraphHelpers
             GetCategory(symbol),
             filePath,
             lineNumber,
-            symbol.ContainingAssembly?.Name);
+            symbol.ContainingAssembly?.Name)
+        {
+            Description = symbol.ToDisplayString(),
+        };
     }
 
     internal static GraphNode CreateContainerNode(ISymbol container, string? projectName)
@@ -154,7 +164,10 @@ internal static class RoslynGraphHelpers
             category,
             filePath,
             lineNumber,
-            null);
+            null)
+        {
+            Description = container.ToDisplayString(),
+        };
     }
 
     internal static string GetStableId(ISymbol symbol)

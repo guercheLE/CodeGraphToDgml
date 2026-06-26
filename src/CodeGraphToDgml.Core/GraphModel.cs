@@ -9,7 +9,10 @@ public sealed record GraphNode(
     string Kind,
     string? FilePath,
     int? Line,
-    string? ProjectName);
+    string? ProjectName)
+{
+    public string? Description { get; init; }
+}
 
 public sealed record GraphLink(
     string SourceId,
@@ -28,13 +31,34 @@ public sealed record CategoryDefinition(
     bool? CanBeDataDriven = null,
     bool? CanLinkedNodesBeDataDriven = null,
     bool? IsContainment = null,
-    string? Description = null);
+    string? Description = null)
+{
+    public bool? IsProviderRoot { get; init; }
+    public bool? IsTag { get; init; }
+    public string? SourceCategory { get; init; }
+    public string? TargetCategory { get; init; }
+    public string? InboundName { get; init; }
+    public string? OutboundName { get; init; }
+}
 
 public sealed record PropertyDefinition(
     string Id,
     string? Label = null,
     string? Description = null,
-    string DataType = "System.String");
+    string DataType = "System.String")
+{
+    public bool? IsReference { get; init; }
+    public string? ReferenceTemplate { get; init; }
+    public string? Group { get; init; }
+}
+
+public enum GraphDirection
+{
+    TopToBottom,
+    BottomToTop,
+    LeftToRight,
+    RightToLeft,
+}
 
 public sealed class TraversalGraph
 {

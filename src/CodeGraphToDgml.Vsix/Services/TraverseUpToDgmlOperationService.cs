@@ -89,7 +89,7 @@ internal sealed class TraverseUpToDgmlOperationService
             var mergedDgml = await Task.Run(() =>
             {
                 var serializer = new DgmlSerializer();
-                return serializer.Merge(existingDgml, graph, replaceContents, options.CollapseGroups);
+                return serializer.Merge(existingDgml, graph, replaceContents, options.CollapseGroups, options.GraphDirection);
             }).ConfigureAwait(false);
 
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(progress.Token);

@@ -20,6 +20,8 @@ public sealed record TraversalOptions
 
     public bool CollapseGroups { get; init; }
 
+    public GraphDirection GraphDirection { get; init; } = GraphDirection.TopToBottom;
+
     public TraversalOptions Normalize()
     {
         return this with

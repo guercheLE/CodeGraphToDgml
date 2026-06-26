@@ -76,6 +76,13 @@ internal class General : BaseOptionModel<General>
     public int MaxHostDepth { get; set; } = 3;
 
     [Category("DGML")]
+    [DisplayName("Graph direction")]
+    [Description("Controls the layout direction of the generated DGML graph.")]
+    [DefaultValue(GraphDirection.TopToBottom)]
+    [TypeConverter(typeof(EnumConverter))]
+    public GraphDirection GraphDirection { get; set; } = GraphDirection.TopToBottom;
+
+    [Category("DGML")]
     [DisplayName("Collapse groups")]
     [Description("When enabled, namespace, class, and other container nodes start collapsed in the DGML graph.")]
     [DefaultValue(false)]
@@ -120,6 +127,7 @@ internal class General : BaseOptionModel<General>
             IncludeComponentHosts = IncludeComponentHosts,
             MaxHostDepth = MaxHostDepth,
             CollapseGroups = CollapseGroups,
+            GraphDirection = GraphDirection,
         }.Normalize();
     }
 }

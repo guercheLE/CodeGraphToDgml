@@ -136,43 +136,43 @@ public sealed class DefaultDgmlSchemaProvider : IDgmlSchemaProvider
 
     public IEnumerable<PropertyDefinition> GetProperties()
     {
-        yield return new PropertyDefinition("FilePath", "File Path", "File Path");
-        yield return new PropertyDefinition("Line", "Line", "Source line number", "System.Int32");
+        yield return new PropertyDefinition("FilePath", "File Path", "File Path") { Group = "Source" };
+        yield return new PropertyDefinition("Line", "Line", "Source line number", "System.Int32") { Group = "Source" };
         yield return new PropertyDefinition("Group", "Group",
             "Display the node as a group",
             "Microsoft.VisualStudio.GraphModel.GraphGroupStyle");
-        yield return new PropertyDefinition("Icon", "Icon", "Icon");
+        yield return new PropertyDefinition("Icon", "Icon", "Icon") { Group = "Display" };
         yield return new PropertyDefinition("Label", "Label",
-            "Displayable label of an Annotatable object");
+            "Displayable label of an Annotatable object") { Group = "Display" };
         yield return new PropertyDefinition("GraphDirection", "Graph Direction",
-            "Graph layout direction");
+            "Graph layout direction") { Group = "Graph" };
         yield return new PropertyDefinition("IsContainment",
-            DataType: "System.Boolean");
+            DataType: "System.Boolean") { Group = "Category" };
         yield return new PropertyDefinition("CanBeDataDriven", "CanBeDataDriven",
-            "CanBeDataDriven", "System.Boolean");
+            "CanBeDataDriven", "System.Boolean") { Group = "Category" };
         yield return new PropertyDefinition("CanLinkedNodesBeDataDriven", "CanLinkedNodesBeDataDriven",
-            "CanLinkedNodesBeDataDriven", "System.Boolean");
+            "CanLinkedNodesBeDataDriven", "System.Boolean") { Group = "Category" };
         yield return new PropertyDefinition("IncomingActionLabel", "IncomingActionLabel",
-            "IncomingActionLabel");
+            "IncomingActionLabel") { Group = "Category" };
         yield return new PropertyDefinition("OutgoingActionLabel", "OutgoingActionLabel",
-            "OutgoingActionLabel");
+            "OutgoingActionLabel") { Group = "Category" };
         yield return new PropertyDefinition("DefaultAction", "DefaultAction",
-            "DefaultAction");
+            "DefaultAction") { Group = "Category" };
         yield return new PropertyDefinition("NavigationActionLabel", "NavigationActionLabel",
-            "NavigationActionLabel");
+            "NavigationActionLabel") { Group = "Category" };
         yield return new PropertyDefinition("Stroke", "Stroke",
-            "Stroke");
+            "Stroke") { Group = "Style" };
         yield return new PropertyDefinition("StrokeDashArray", "Stroke Dash Array",
-            "Stroke Dash Array");
+            "Stroke Dash Array") { Group = "Style" };
         yield return new PropertyDefinition("DrawArrow", "Draw Arrow",
-            "Draw Arrow", "System.Boolean");
+            "Draw Arrow", "System.Boolean") { Group = "Style" };
         yield return new PropertyDefinition("DataVirtualized", "Data Virtualized",
-            "Indicates whether the graph data is virtualized", "System.Boolean");
+            "Indicates whether the graph data is virtualized", "System.Boolean") { Group = "Graph" };
         yield return new PropertyDefinition("LayoutSettings", "Layout Settings",
-            "Layout Settings");
+            "Layout Settings") { Group = "Graph" };
         yield return new PropertyDefinition("Visibility", "Visibility",
             "Visibility",
-            "System.Windows.Visibility");
+            "System.Windows.Visibility") { Group = "Display" };
     }
 
     public IEnumerable<XElement> GetStyles(XNamespace xmlNamespace)
@@ -255,16 +255,16 @@ public sealed class DgmlSerializer
         _schemaProvider = schemaProvider ?? new DefaultDgmlSchemaProvider();
     }
 
-    public string Merge(string? existingDgml, TraversalGraph graph, bool replaceContents, bool collapseGroups = false)
+    public string Merge(string? existingDgml, TraversalGraph graph, bool replaceContents, bool collapseGroups = false, GraphDirection graphDirection = GraphDirection.TopToBottom)
     {
         var document = string.IsNullOrWhiteSpace(existingDgml)
-            ? CreateEmptyDocument()
+            ? CreateEmptyDocument(graphDirection)
             : XDocument.Parse(existingDgml, LoadOptions.PreserveWhitespace);
 
         document.Declaration = new XDeclaration("1.0", "utf-8", "yes");
 
         var root = EnsureRoot(document);
-        root.SetAttributeValue("GraphDirection", "TopToBottom");
+        root.SetAttributeValue("GraphDirection", graphDirection.ToString());
 
         var nodesElement = EnsureChild(root, "Nodes");
         var linksElement = EnsureChild(root, "Links");
@@ -302,6 +302,11 @@ public sealed class DgmlSerializer
             if (IsContainerKind(node.Kind))
             {
                 nodeElement.SetAttributeValue("Group", collapseGroups ? "Collapsed" : "Expanded");
+            }
+
+            if (!string.IsNullOrWhiteSpace(node.Description))
+            {
+                nodeElement.SetAttributeValue("Description", node.Description);
             }
 
             if (!string.IsNullOrWhiteSpace(node.FilePath))
@@ -346,12 +351,12 @@ public sealed class DgmlSerializer
         return Serialize(CreateEmptyDocument());
     }
 
-    private XDocument CreateEmptyDocument()
+    private XDocument CreateEmptyDocument(GraphDirection graphDirection = GraphDirection.TopToBottom)
     {
         return new XDocument(
             new XDeclaration("1.0", "utf-8", "yes"),
             new XElement(Namespace + "DirectedGraph",
-                new XAttribute("GraphDirection", "TopToBottom"),
+                new XAttribute("GraphDirection", graphDirection.ToString()),
                 new XElement(Namespace + "Nodes"),
                 new XElement(Namespace + "Links"),
                 CreateCategoriesElement(),
@@ -425,10 +430,16 @@ public sealed class DgmlSerializer
         SetAttributeIfNotNull(element, "DefaultAction", category.DefaultAction);
         SetAttributeIfNotNull(element, "Description", category.Description);
         SetAttributeIfNotNull(element, "Icon", category.Icon);
+        SetAttributeIfNotNull(element, "InboundName", category.InboundName);
         SetAttributeIfNotNull(element, "IncomingActionLabel", category.IncomingActionLabel);
         SetAttributeIfHasValue(element, "IsContainment", category.IsContainment);
+        SetAttributeIfHasValue(element, "IsProviderRoot", category.IsProviderRoot);
+        SetAttributeIfHasValue(element, "IsTag", category.IsTag);
         SetAttributeIfNotNull(element, "NavigationActionLabel", category.NavigationActionLabel);
+        SetAttributeIfNotNull(element, "OutboundName", category.OutboundName);
         SetAttributeIfNotNull(element, "OutgoingActionLabel", category.OutgoingActionLabel);
+        SetAttributeIfNotNull(element, "SourceCategory", category.SourceCategory);
+        SetAttributeIfNotNull(element, "TargetCategory", category.TargetCategory);
 
         return element;
     }
@@ -452,6 +463,9 @@ public sealed class DgmlSerializer
 
                 SetAttributeIfNotNull(element, "Label", property.Label);
                 SetAttributeIfNotNull(element, "Description", property.Description);
+                SetAttributeIfNotNull(element, "Group", property.Group);
+                SetAttributeIfHasValue(element, "IsReference", property.IsReference);
+                SetAttributeIfNotNull(element, "ReferenceTemplate", property.ReferenceTemplate);
 
                 propertiesElement.Add(element);
             }
@@ -472,165 +486,6 @@ public sealed class DgmlSerializer
         return element;
     }
 
-    private static IEnumerable<CategoryDefinition> GetCategoryDefinitions()
-    {
-        yield return new CategoryDefinition("CodeSchema_Assembly", "Assembly",
-            Icon: "CodeSchema_Assembly",
-            DefaultAction: "Microsoft.Contains",
-            CanBeDataDriven: true,
-            NavigationActionLabel: "Assemblies");
-
-        yield return new CategoryDefinition("CodeSchema_Namespace", "Namespace",
-            Icon: "CodeSchema_Namespace",
-            DefaultAction: "Node:Both:CodeSchema_Type",
-            CanBeDataDriven: true,
-            NavigationActionLabel: "Namespaces");
-
-        yield return new CategoryDefinition("CodeSchema_Class", "Class",
-            BasedOn: "CodeSchema_Type",
-            Icon: "CodeSchema_Class",
-            DefaultAction: "Node:Both:CodeSchema_Member",
-            CanBeDataDriven: true,
-            NavigationActionLabel: "Classes");
-
-        yield return new CategoryDefinition("CodeSchema_Interface", "Interface",
-            BasedOn: "CodeSchema_Type",
-            Icon: "CodeSchema_Interface",
-            DefaultAction: "Node:Both:CodeSchema_Member",
-            CanBeDataDriven: true,
-            NavigationActionLabel: "Interfaces");
-
-        yield return new CategoryDefinition("CodeSchema_Struct", "Struct",
-            BasedOn: "CodeSchema_Type",
-            Icon: "CodeSchema_Struct",
-            DefaultAction: "Node:Both:CodeSchema_Member",
-            CanBeDataDriven: true,
-            NavigationActionLabel: "Structs");
-
-        yield return new CategoryDefinition("CodeSchema_Enum", "Enum",
-            BasedOn: "CodeSchema_Type",
-            Icon: "CodeSchema_Enum",
-            DefaultAction: "Node:Both:CodeSchema_Member",
-            CanBeDataDriven: true,
-            NavigationActionLabel: "Enums");
-
-        yield return new CategoryDefinition("CodeSchema_Delegate", "Delegate",
-            BasedOn: "CodeSchema_Type",
-            Icon: "CodeSchema_Delegate",
-            CanBeDataDriven: true,
-            NavigationActionLabel: "Delegates");
-
-        yield return new CategoryDefinition("CodeSchema_Type", "Type",
-            Icon: "CodeSchema_Class",
-            DefaultAction: "Node:Both:CodeSchema_Member",
-            CanBeDataDriven: true,
-            NavigationActionLabel: "Types");
-
-        yield return new CategoryDefinition("CodeSchema_Method", "Method",
-            Icon: "CodeSchema_Method",
-            CanBeDataDriven: true);
-
-        yield return new CategoryDefinition("CodeSchema_Property", "Property",
-            Icon: "CodeSchema_Property",
-            CanBeDataDriven: true);
-
-        yield return new CategoryDefinition("CodeSchema_Event", "Event",
-            Icon: "CodeSchema_Event",
-            CanBeDataDriven: true);
-
-        yield return new CategoryDefinition("CodeSchema_Field", "Field",
-            Icon: "CodeSchema_Field",
-            CanBeDataDriven: true);
-
-        yield return new CategoryDefinition("CodeSchema_Calls", "Calls",
-            CanBeDataDriven: true,
-            CanLinkedNodesBeDataDriven: true,
-            IncomingActionLabel: "Called By",
-            OutgoingActionLabel: "Calls");
-
-        yield return new CategoryDefinition("CodeSchema_FunctionPointer", "Function Pointer",
-            CanBeDataDriven: true,
-            CanLinkedNodesBeDataDriven: true,
-            IncomingActionLabel: "Called By",
-            OutgoingActionLabel: "Calls");
-
-        yield return new CategoryDefinition("Implements", "Implements",
-            CanBeDataDriven: true,
-            CanLinkedNodesBeDataDriven: true,
-            IncomingActionLabel: "Implemented By",
-            OutgoingActionLabel: "Implements");
-
-        yield return new CategoryDefinition("Contains", "Contains",
-            Description: "Whether the source of the link contains the target object",
-            CanBeDataDriven: false,
-            CanLinkedNodesBeDataDriven: true,
-            IncomingActionLabel: "Contained By",
-            OutgoingActionLabel: "Contains",
-            IsContainment: true);
-
-        yield return new CategoryDefinition("References", "References",
-            CanBeDataDriven: true,
-            CanLinkedNodesBeDataDriven: true,
-            IncomingActionLabel: "Referenced By",
-            OutgoingActionLabel: "References");
-
-        yield return new CategoryDefinition("InheritsFrom", "Inherits From",
-            CanBeDataDriven: true,
-            CanLinkedNodesBeDataDriven: true,
-            IncomingActionLabel: "Inherited By",
-            OutgoingActionLabel: "Inherits From");
-
-        yield return new CategoryDefinition("UsedBy", "Used By",
-            CanBeDataDriven: true,
-            CanLinkedNodesBeDataDriven: true,
-            IncomingActionLabel: "Used By",
-            OutgoingActionLabel: "Uses");
-
-        yield return new CategoryDefinition("Externals", "Externals",
-            CanBeDataDriven: true);
-    }
-
-    private static IEnumerable<PropertyDefinition> GetPropertyDefinitions()
-    {
-        yield return new PropertyDefinition("FilePath", "File Path", "File Path");
-        yield return new PropertyDefinition("Line", "Line", "Source line number", "System.Int32");
-        yield return new PropertyDefinition("Group", "Group",
-            "Display the node as a group",
-            "Microsoft.VisualStudio.GraphModel.GraphGroupStyle");
-        yield return new PropertyDefinition("Icon", "Icon", "Icon");
-        yield return new PropertyDefinition("Label", "Label",
-            "Displayable label of an Annotatable object");
-        yield return new PropertyDefinition("GraphDirection", "Graph Direction",
-            "Graph layout direction");
-        yield return new PropertyDefinition("IsContainment",
-            DataType: "System.Boolean");
-        yield return new PropertyDefinition("CanBeDataDriven", "CanBeDataDriven",
-            "CanBeDataDriven", "System.Boolean");
-        yield return new PropertyDefinition("CanLinkedNodesBeDataDriven", "CanLinkedNodesBeDataDriven",
-            "CanLinkedNodesBeDataDriven", "System.Boolean");
-        yield return new PropertyDefinition("IncomingActionLabel", "IncomingActionLabel",
-            "IncomingActionLabel");
-        yield return new PropertyDefinition("OutgoingActionLabel", "OutgoingActionLabel",
-            "OutgoingActionLabel");
-        yield return new PropertyDefinition("DefaultAction", "DefaultAction",
-            "DefaultAction");
-        yield return new PropertyDefinition("NavigationActionLabel", "NavigationActionLabel",
-            "NavigationActionLabel");
-        yield return new PropertyDefinition("Stroke", "Stroke",
-            "Stroke");
-        yield return new PropertyDefinition("StrokeDashArray", "Stroke Dash Array",
-            "Stroke Dash Array");
-        yield return new PropertyDefinition("DrawArrow", "Draw Arrow",
-            "Draw Arrow", "System.Boolean");
-        yield return new PropertyDefinition("DataVirtualized", "Data Virtualized",
-            "Indicates whether the graph data is virtualized", "System.Boolean");
-        yield return new PropertyDefinition("LayoutSettings", "Layout Settings",
-            "Layout Settings");
-        yield return new PropertyDefinition("Visibility", "Visibility",
-            "Visibility",
-            "System.Windows.Visibility");
-    }
-
     private static string CreateLinkKey(XElement element)
     {
         return CreateLinkKey(
@@ -646,8 +501,10 @@ public sealed class DgmlSerializer
 
     private static bool IsContainerKind(string kind)
     {
-        return kind is "CodeSchema_Assembly" or "CodeSchema_Namespace" or "CodeSchema_Class"
-            or "CodeSchema_Interface" or "CodeSchema_Struct" or "CodeSchema_Enum" or "CodeSchema_Delegate";
+        return kind is "CodeSchema_Assembly" or "CodeSchema_Namespace"
+            or "CodeSchema_Class" or "CodeSchema_Interface" or "CodeSchema_Struct"
+            or "CodeSchema_Enum" or "CodeSchema_Delegate" or "CodeSchema_Type"
+            or "Externals";
     }
 
     private static string Serialize(XDocument document)

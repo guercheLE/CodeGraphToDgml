@@ -637,7 +637,10 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             category,
             filePath,
             lineNumber,
-            null);
+            null)
+        {
+            Description = container.ToDisplayString(),
+        };
     }
 
     private static async Task<ISymbol?> ResolveSymbolAsync(
@@ -808,7 +811,10 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             GetCategory(symbol),
             filePath,
             lineNumber,
-            symbol.ContainingAssembly?.Name);
+            symbol.ContainingAssembly?.Name)
+        {
+            Description = symbol.ToDisplayString(),
+        };
     }
 
     private static string GetNodeLabel(ISymbol symbol)
