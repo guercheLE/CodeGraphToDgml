@@ -13,7 +13,7 @@ public sealed class MermaidSequenceSerializerTests
     // ──────────────────────────────────────────────────────────────────────────
 
     private static CallSequenceCallNode Leaf(string from, string to, string label)
-        => new(from, to, label, Array.Empty<CallSequenceCallNode>());
+        => new(from, to, label, []);
 
     private static CallSequenceCallNode Nested(string from, string to, string label, params CallSequenceCallNode[] children)
         => new(from, to, label, children);
@@ -24,12 +24,12 @@ public sealed class MermaidSequenceSerializerTests
     private static CallSequence LinearChain() => new()
     {
         Title = "ClassA.Root",
-        Participants = new[] { P("ClassA", "ClassA"), P("ClassB", "ClassB"), P("ClassC", "ClassC") },
-        RootCalls = new[]
-        {
+        Participants = [P("ClassA", "ClassA"), P("ClassB", "ClassB"), P("ClassC", "ClassC")],
+        RootCalls =
+        [
             Nested("ClassA", "ClassB", "DoB",
                 Leaf("ClassB", "ClassC", "DoC")),
-        },
+        ],
     };
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ public sealed class MermaidSequenceSerializerTests
     public void Serialize_StartsWithSequenceDiagramKeyword()
     {
         var result = Serializer.Serialize(LinearChain());
-        Assert.IsTrue(result.TrimStart().StartsWith("sequenceDiagram"), result);
+        Assert.StartsWith("sequenceDiagram", result.TrimStart(), result);
     }
 
     [TestMethod]
@@ -55,12 +55,12 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("SvcA", "ServiceA"), P("SvcB", "ServiceB") },
+            Participants = [P("SvcA", "ServiceA"), P("SvcB", "ServiceB")],
         };
 
         var result = Serializer.Serialize(sequence);
-        StringAssert.Contains(result, "participant SvcA as ServiceA");
-        StringAssert.Contains(result, "participant SvcB as ServiceB");
+        Assert.Contains("participant SvcA as ServiceA", result);
+        Assert.Contains("participant SvcB as ServiceB", result);
     }
 
     [TestMethod]
@@ -68,12 +68,12 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("First", "First"), P("Second", "Second"), P("Third", "Third") },
+            Participants = [P("First", "First"), P("Second", "Second"), P("Third", "Third")],
         };
 
         var result = Serializer.Serialize(sequence);
-        Assert.IsTrue(result.IndexOf("participant First") < result.IndexOf("participant Second"));
-        Assert.IsTrue(result.IndexOf("participant Second") < result.IndexOf("participant Third"));
+        Assert.IsLessThan(result.IndexOf("participant Second"), result.IndexOf("participant First"));
+        Assert.IsLessThan(result.IndexOf("participant Third"), result.IndexOf("participant Second"));
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -85,14 +85,14 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B") },
-            RootCalls = new[] { Leaf("A", "B", "Foo") },
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", "Foo")],
         };
 
         var result = Serializer.Serialize(sequence);
-        StringAssert.Contains(result, "A->>B: Foo");
-        Assert.IsFalse(result.Contains("->>+"), "Leaf call must not activate");
-        Assert.IsFalse(result.Contains("-->>-"), "Leaf call must not deactivate");
+        Assert.Contains("A->>B: Foo", result);
+        Assert.DoesNotContain("->>+", result, "Leaf call must not activate");
+        Assert.DoesNotContain("-->>-", result, "Leaf call must not deactivate");
     }
 
     [TestMethod]
@@ -100,9 +100,9 @@ public sealed class MermaidSequenceSerializerTests
     {
         var result = Serializer.Serialize(LinearChain());
 
-        StringAssert.Contains(result, "ClassA->>+ClassB: DoB");
-        StringAssert.Contains(result, "ClassB->>ClassC: DoC");
-        StringAssert.Contains(result, "ClassB-->>-ClassA: ");
+        Assert.Contains("ClassA->>+ClassB: DoB", result);
+        Assert.Contains("ClassB->>ClassC: DoC", result);
+        Assert.Contains("ClassB-->>-ClassA: ", result);
     }
 
     [TestMethod]
@@ -110,10 +110,10 @@ public sealed class MermaidSequenceSerializerTests
     {
         var result = Serializer.Serialize(LinearChain(), stackedActivationBars: false);
 
-        StringAssert.Contains(result, "ClassA->>ClassB: DoB");
-        StringAssert.Contains(result, "ClassB->>ClassC: DoC");
-        Assert.IsFalse(result.Contains("->>+"), "No activation markers when stacked bars off");
-        Assert.IsFalse(result.Contains("-->>-"), "No deactivation markers when stacked bars off");
+        Assert.Contains("ClassA->>ClassB: DoB", result);
+        Assert.Contains("ClassB->>ClassC: DoC", result);
+        Assert.DoesNotContain("->>+", result, "No activation markers when stacked bars off");
+        Assert.DoesNotContain("-->>-", result, "No deactivation markers when stacked bars off");
     }
 
     [TestMethod]
@@ -121,12 +121,12 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("MyClass", "MyClass") },
-            RootCalls = new[] { Leaf("MyClass", "MyClass", "Helper") },
+            Participants = [P("MyClass", "MyClass")],
+            RootCalls = [Leaf("MyClass", "MyClass", "Helper")],
         };
 
         var result = Serializer.Serialize(sequence);
-        StringAssert.Contains(result, "MyClass->>MyClass: Helper");
+        Assert.Contains("MyClass->>MyClass: Helper", result);
     }
 
     [TestMethod]
@@ -134,19 +134,19 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B") },
-            RootCalls = new[]
-            {
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls =
+            [
                 Nested("A", "A", "SelfWithNested",
                     Leaf("A", "B", "Inner")),
-            },
+            ],
         };
 
         var result = Serializer.Serialize(sequence, stackedActivationBars: false);
-        StringAssert.Contains(result, "A->>A: SelfWithNested");
-        StringAssert.Contains(result, "A->>B: Inner");
-        Assert.IsFalse(result.Contains("->>+"), "No activation markers when stacked bars off");
-        Assert.IsFalse(result.Contains("-->>-"), "No deactivation markers when stacked bars off");
+        Assert.Contains("A->>A: SelfWithNested", result);
+        Assert.Contains("A->>B: Inner", result);
+        Assert.DoesNotContain("->>+", result, "No activation markers when stacked bars off");
+        Assert.DoesNotContain("-->>-", result, "No deactivation markers when stacked bars off");
     }
 
     [TestMethod]
@@ -154,18 +154,18 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B") },
-            RootCalls = new[]
-            {
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls =
+            [
                 Nested("A", "A", "SelfWithNested",
                     Leaf("A", "B", "Inner")),
-            },
+            ],
         };
 
         var result = Serializer.Serialize(sequence, stackedActivationBars: true);
-        StringAssert.Contains(result, "A->>+A: SelfWithNested");
-        StringAssert.Contains(result, "A->>B: Inner");
-        StringAssert.Contains(result, "A-->>-A: ");
+        Assert.Contains("A->>+A: SelfWithNested", result);
+        Assert.Contains("A->>B: Inner", result);
+        Assert.Contains("A-->>-A: ", result);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -182,8 +182,8 @@ public sealed class MermaidSequenceSerializerTests
         int callC = Array.FindIndex(lines, l => l.StartsWith("ClassB->>ClassC"));
         int retA  = Array.FindIndex(lines, l => l.StartsWith("ClassB-->>-ClassA"));
 
-        Assert.IsTrue(callB < callC, "Call to B should precede call to C");
-        Assert.IsTrue(callC < retA,  "Call to C should precede deactivation of B→A");
+        Assert.IsLessThan(callC, callB, "Call to B should precede call to C");
+        Assert.IsLessThan(retA, callC,  "Call to C should precede deactivation of B→A");
     }
 
     [TestMethod]
@@ -191,17 +191,17 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B"), P("C", "C") },
-            RootCalls = new[]
-            {
+            Participants = [P("A", "A"), P("B", "B"), P("C", "C")],
+            RootCalls =
+            [
                 Leaf("A", "B", "Foo"),
                 Leaf("A", "C", "Bar"),
-            },
+            ],
         };
 
         var result = Serializer.Serialize(sequence);
-        StringAssert.Contains(result, "A->>B: Foo");
-        StringAssert.Contains(result, "A->>C: Bar");
+        Assert.Contains("A->>B: Foo", result);
+        Assert.Contains("A->>C: Bar", result);
     }
 
     [TestMethod]
@@ -209,16 +209,16 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B"), P("C", "C") },
-            RootCalls = new[]
-            {
+            Participants = [P("A", "A"), P("B", "B"), P("C", "C")],
+            RootCalls =
+            [
                 Leaf("A", "B", "First"),
                 Leaf("A", "C", "Second"),
-            },
+            ],
         };
 
         var result = Serializer.Serialize(sequence);
-        Assert.IsTrue(result.IndexOf("First") < result.IndexOf("Second"));
+        Assert.IsLessThan(result.IndexOf("Second"), result.IndexOf("First"));
     }
 
     [TestMethod]
@@ -228,13 +228,13 @@ public sealed class MermaidSequenceSerializerTests
         var sequence = new CallSequence
         {
             Title = "A.Entry",
-            Participants = new[] { P("A", "A"), P("B", "B"), P("C", "C"), P("D", "D") },
-            RootCalls = new[]
-            {
+            Participants = [P("A", "A"), P("B", "B"), P("C", "C"), P("D", "D")],
+            RootCalls =
+            [
                 Nested("A", "B", "Top",
                     Nested("B", "C", "Mid",
                         Leaf("C", "D", "Deep"))),
-            },
+            ],
         };
 
         var result = Serializer.Serialize(sequence);
@@ -246,16 +246,16 @@ public sealed class MermaidSequenceSerializerTests
         int retB  = Array.FindIndex(lines, l => l.StartsWith("C-->>-B"));
         int retA  = Array.FindIndex(lines, l => l.StartsWith("B-->>-A"));
 
-        Assert.IsTrue(callB >= 0, "Missing A->>+B");
-        Assert.IsTrue(callC >= 0, "Missing B->>+C");
-        Assert.IsTrue(callD >= 0, "Missing C->>D (leaf, no +)");
-        Assert.IsTrue(retB  >= 0, "Missing C-->>-B");
-        Assert.IsTrue(retA  >= 0, "Missing B-->>-A");
+        Assert.IsGreaterThanOrEqualTo(0, callB, "Missing A->>+B");
+        Assert.IsGreaterThanOrEqualTo(0, callC, "Missing B->>+C");
+        Assert.IsGreaterThanOrEqualTo(0, callD, "Missing C->>D (leaf, no +)");
+        Assert.IsGreaterThanOrEqualTo(0, retB, "Missing C-->>-B");
+        Assert.IsGreaterThanOrEqualTo(0, retA, "Missing B-->>-A");
 
-        Assert.IsTrue(callB < callC, "A→B must precede B→C");
-        Assert.IsTrue(callC < callD, "B→C must precede C→D");
-        Assert.IsTrue(callD < retB,  "C→D must precede deactivation of C");
-        Assert.IsTrue(retB  < retA,  "C deactivation must precede B deactivation");
+        Assert.IsLessThan(callC, callB, "A→B must precede B→C");
+        Assert.IsLessThan(callD, callC, "B→C must precede C→D");
+        Assert.IsLessThan(retB, callD,  "C→D must precede deactivation of C");
+        Assert.IsLessThan(retA, retB,  "C deactivation must precede B deactivation");
     }
 
     [TestMethod]
@@ -264,12 +264,12 @@ public sealed class MermaidSequenceSerializerTests
         // A calls B (nested: B calls C), then A calls D
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B"), P("C", "C"), P("D", "D") },
-            RootCalls = new[]
-            {
+            Participants = [P("A", "A"), P("B", "B"), P("C", "C"), P("D", "D")],
+            RootCalls =
+            [
                 Nested("A", "B", "WithNested", Leaf("B", "C", "Inner")),
                 Leaf("A", "D", "After"),
-            },
+            ],
         };
 
         var result = Serializer.Serialize(sequence);
@@ -280,9 +280,9 @@ public sealed class MermaidSequenceSerializerTests
         int retA    = Array.FindIndex(lines, l => l.StartsWith("B-->>-A"));
         int callD   = Array.FindIndex(lines, l => l.Contains("After"));
 
-        Assert.IsTrue(callB < inner, "Call B must precede inner call");
-        Assert.IsTrue(inner < retA, "Inner call must precede B deactivation");
-        Assert.IsTrue(retA < callD, "B deactivation must precede call to D");
+        Assert.IsLessThan(inner, callB, "Call B must precede inner call");
+        Assert.IsLessThan(retA, inner, "Inner call must precede B deactivation");
+        Assert.IsLessThan(callD, retA, "B deactivation must precede call to D");
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -294,13 +294,13 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B") },
-            RootCalls = new[] { Leaf("A", "B", "Method: special") },
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", "Method: special")],
         };
 
         var result = Serializer.Serialize(sequence);
-        StringAssert.Contains(result, "Method#colon; special");
-        Assert.IsFalse(result.Contains("Method: special"), "Raw colon must be escaped");
+        Assert.Contains("Method#colon; special", result);
+        Assert.DoesNotContain("Method: special", result, "Raw colon must be escaped");
     }
 
     [TestMethod]
@@ -308,13 +308,13 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B") },
-            RootCalls = new[] { Leaf("A", "B", "Get<T>") },
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", "Get<T>")],
         };
 
         var result = Serializer.Serialize(sequence);
-        StringAssert.Contains(result, "Get#lt;T#gt;");
-        Assert.IsFalse(result.Contains("Get<T>"), "Raw angle brackets must be escaped");
+        Assert.Contains("Get#lt;T#gt;", result);
+        Assert.DoesNotContain("Get<T>", result, "Raw angle brackets must be escaped");
     }
 
     [TestMethod]
@@ -322,13 +322,13 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B") },
-            RootCalls = new[] { Leaf("A", "B", "A&B") },
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", "A&B")],
         };
 
         var result = Serializer.Serialize(sequence);
-        StringAssert.Contains(result, "A#amp;B");
-        Assert.IsFalse(result.Contains("A&B"), "Raw ampersand must be escaped");
+        Assert.Contains("A#amp;B", result);
+        Assert.DoesNotContain("A&B", result, "Raw ampersand must be escaped");
     }
 
     [TestMethod]
@@ -336,11 +336,11 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "Label:With:Colons") },
+            Participants = [P("A", "Label:With:Colons")],
         };
 
         var result = Serializer.Serialize(sequence);
-        StringAssert.Contains(result, "as Label#colon;With#colon;Colons");
+        Assert.Contains("as Label#colon;With#colon;Colons", result);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -352,17 +352,17 @@ public sealed class MermaidSequenceSerializerTests
     {
         var sequence = new CallSequence { Title = "MyClass.DoWork" };
         var result = Serializer.BuildMarkdown(sequence);
-        StringAssert.Contains(result, "# Sequence: MyClass.DoWork");
+        Assert.Contains("# Sequence: MyClass.DoWork", result);
     }
 
     [TestMethod]
     public void BuildMarkdown_ContainsMermaidFenceBlock()
     {
         var result = Serializer.BuildMarkdown(new CallSequence());
-        StringAssert.Contains(result, "```mermaid");
-        StringAssert.Contains(result, "sequenceDiagram");
+        Assert.Contains("```mermaid", result);
+        Assert.Contains("sequenceDiagram", result);
         // At least two ``` markers (open + close)
-        Assert.IsTrue(result.Split(new[] { "```" }, StringSplitOptions.None).Length >= 3);
+        Assert.IsGreaterThanOrEqualTo(3, result.Split(["```"], StringSplitOptions.None).Length);
     }
 
     [TestMethod]
@@ -371,8 +371,8 @@ public sealed class MermaidSequenceSerializerTests
         var sequence = new CallSequence
         {
             Title = "X",
-            Participants = new[] { P("A", "A"), P("B", "B") },
-            RootCalls = new[] { Leaf("A", "B", "Go") },
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", "Go")],
         };
 
         var result = Serializer.BuildMarkdown(sequence);
@@ -380,8 +380,8 @@ public sealed class MermaidSequenceSerializerTests
         int fenceClose = result.LastIndexOf("```");
         int callLine  = result.IndexOf("A->>B: Go");
 
-        Assert.IsTrue(callLine > fenceOpen, "Call line must be inside the opening fence");
-        Assert.IsTrue(callLine < fenceClose, "Call line must be before the closing fence");
+        Assert.IsGreaterThan(fenceOpen, callLine, "Call line must be inside the opening fence");
+        Assert.IsLessThan(fenceClose, callLine, "Call line must be before the closing fence");
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -393,43 +393,43 @@ public sealed class MermaidSequenceSerializerTests
     {
         var result = Serializer.BuildHtml(new CallSequence { Title = "Test" });
 
-        Assert.IsTrue(result.TrimStart().StartsWith("<!DOCTYPE html>"));
-        StringAssert.Contains(result, "<html");
-        StringAssert.Contains(result, "</html>");
-        StringAssert.Contains(result, "<head>");
-        StringAssert.Contains(result, "</head>");
-        StringAssert.Contains(result, "<body>");
-        StringAssert.Contains(result, "</body>");
+        Assert.StartsWith("<!DOCTYPE html>", result.TrimStart());
+        Assert.Contains("<html", result);
+        Assert.Contains("</html>", result);
+        Assert.Contains("<head>", result);
+        Assert.Contains("</head>", result);
+        Assert.Contains("<body>", result);
+        Assert.Contains("</body>", result);
     }
 
     [TestMethod]
     public void BuildHtml_ContainsMermaidCdnImport()
     {
         var result = Serializer.BuildHtml(new CallSequence { Title = "Test" });
-        StringAssert.Contains(result, "cdn.jsdelivr.net/npm/mermaid@11");
+        Assert.Contains("cdn.jsdelivr.net/npm/mermaid@11", result);
     }
 
     [TestMethod]
     public void BuildHtml_ContainsDiagramSourceAsJsVariable()
     {
         var result = Serializer.BuildHtml(new CallSequence { Title = "Test" });
-        StringAssert.Contains(result, "const DIAGRAM_SOURCE =");
+        Assert.Contains("const DIAGRAM_SOURCE =", result);
     }
 
     [TestMethod]
     public void BuildHtml_ContainsZoomControls()
     {
         var result = Serializer.BuildHtml(new CallSequence { Title = "Test" });
-        StringAssert.Contains(result, "zoom(");
-        StringAssert.Contains(result, "fitWidth");
-        StringAssert.Contains(result, "resetZoom");
+        Assert.Contains("zoom(", result);
+        Assert.Contains("fitWidth", result);
+        Assert.Contains("resetZoom", result);
     }
 
     [TestMethod]
     public void BuildHtml_ContainsDiagramContainer()
     {
         var result = Serializer.BuildHtml(new CallSequence { Title = "Test" });
-        StringAssert.Contains(result, "diagram-container");
+        Assert.Contains("diagram-container", result);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -442,8 +442,8 @@ public sealed class MermaidSequenceSerializerTests
         var sequence = new CallSequence { Title = "<script>alert('xss')</script>" };
         var result = Serializer.BuildHtml(sequence);
 
-        Assert.IsFalse(result.Contains("<script>alert"), "Raw XSS script tag must not appear in HTML");
-        StringAssert.Contains(result, "&lt;script&gt;");
+        Assert.DoesNotContain("<script>alert", result, "Raw XSS script tag must not appear in HTML");
+        Assert.Contains("&lt;script&gt;", result);
     }
 
     [TestMethod]
@@ -452,7 +452,7 @@ public sealed class MermaidSequenceSerializerTests
         var sequence = new CallSequence { Title = "A & B" };
         var result = Serializer.BuildHtml(sequence);
 
-        StringAssert.Contains(result, "A &amp; B");
+        Assert.Contains("A &amp; B", result);
     }
 
     [TestMethod]
@@ -464,9 +464,9 @@ public sealed class MermaidSequenceSerializerTests
         const string scriptOpen = "<script type=\"module\">";
         int start = result.IndexOf(scriptOpen) + scriptOpen.Length;
         int end   = result.LastIndexOf("</script>");
-        var scriptContent = result.Substring(start, end - start);
+        var scriptContent = result[start..end];
 
-        Assert.IsFalse(scriptContent.Contains("</script"), "Script block must not contain </script");
+        Assert.DoesNotContain("</script", scriptContent, "Script block must not contain </script");
     }
 
     [TestMethod]
@@ -476,22 +476,22 @@ public sealed class MermaidSequenceSerializerTests
         // to prevent the HTML parser from finding </script> inside the script tag.
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B") },
-            RootCalls = new[] { Leaf("A", "B", "M") },
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", "M")],
         };
 
         var html = Serializer.BuildHtml(sequence);
 
         const string varPrefix = "const DIAGRAM_SOURCE = \"";
         int markerIdx = html.IndexOf(varPrefix);
-        Assert.IsTrue(markerIdx >= 0, "DIAGRAM_SOURCE variable not found");
+        Assert.IsGreaterThanOrEqualTo(0, markerIdx, "DIAGRAM_SOURCE variable not found");
 
         int contentStart = markerIdx + varPrefix.Length;
         int contentEnd   = html.IndexOf("\";", contentStart);
-        var jsStringContent = html.Substring(contentStart, contentEnd - contentStart);
+        var jsStringContent = html[contentStart..contentEnd];
 
-        Assert.IsTrue(jsStringContent.Contains("\\u003e"), "Arrow '>' must be unicode-escaped to \\u003e");
-        Assert.IsFalse(jsStringContent.Contains('>'), "Raw '>' must not appear in the JS string literal");
+        Assert.Contains("\\u003e", jsStringContent, "Arrow '>' must be unicode-escaped to \\u003e");
+        Assert.DoesNotContain('>', jsStringContent, "Raw '>' must not appear in the JS string literal");
     }
 
     [TestMethod]
@@ -501,8 +501,8 @@ public sealed class MermaidSequenceSerializerTests
         // no raw '<' or '>' should appear inside the JS string in the HTML.
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B") },
-            RootCalls = new[] { Leaf("A", "B", "Get<T>") },  // label will become Get#lt;T#gt;
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", "Get<T>")],  // label will become Get#lt;T#gt;
         };
 
         var html = Serializer.BuildHtml(sequence);
@@ -510,10 +510,10 @@ public sealed class MermaidSequenceSerializerTests
         const string varPrefix = "const DIAGRAM_SOURCE = \"";
         int contentStart = html.IndexOf(varPrefix) + varPrefix.Length;
         int contentEnd   = html.IndexOf("\";", contentStart);
-        var jsString = html.Substring(contentStart, contentEnd - contentStart);
+        var jsString = html[contentStart..contentEnd];
 
-        Assert.IsFalse(jsString.Contains('<'), "No raw '<' in JS string literal");
-        Assert.IsFalse(jsString.Contains('>'), "No raw '>' in JS string literal");
+        Assert.DoesNotContain('<', jsString, "No raw '<' in JS string literal");
+        Assert.DoesNotContain('>', jsString, "No raw '>' in JS string literal");
     }
 
     [TestMethod]
@@ -522,8 +522,8 @@ public sealed class MermaidSequenceSerializerTests
         // A backslash in the mermaid label must become \\ in the JS string.
         var sequence = new CallSequence
         {
-            Participants = new[] { P("A", "A"), P("B", "B") },
-            RootCalls = new[] { Leaf("A", "B", @"Path\File") },
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", @"Path\File")],
         };
 
         var html = Serializer.BuildHtml(sequence);
@@ -531,10 +531,10 @@ public sealed class MermaidSequenceSerializerTests
         const string varPrefix = "const DIAGRAM_SOURCE = \"";
         int contentStart = html.IndexOf(varPrefix) + varPrefix.Length;
         int contentEnd   = html.IndexOf("\";", contentStart);
-        var jsString = html.Substring(contentStart, contentEnd - contentStart);
+        var jsString = html[contentStart..contentEnd];
 
         // In HTML the JS string literal: "...Path\\File..." — C# sees it as "...Path\\File..."
-        StringAssert.Contains(jsString, @"\\");
+        Assert.Contains(@"\\", jsString);
     }
 
     [TestMethod]
@@ -544,19 +544,19 @@ public sealed class MermaidSequenceSerializerTests
         var sequence = new CallSequence
         {
             Title = "Test",
-            Participants = new[] { P("A", "A"), P("B", "B") },
-            RootCalls = new[] { Leaf("A", "B", "Go") },
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", "Go")],
         };
         var result = Serializer.BuildHtml(sequence);
 
         const string varPrefix = "const DIAGRAM_SOURCE = \"";
         int contentStart = result.IndexOf(varPrefix) + varPrefix.Length;
         int contentEnd   = result.IndexOf("\";", contentStart);
-        var jsString = result.Substring(contentStart, contentEnd - contentStart);
+        var jsString = result[contentStart..contentEnd];
 
         // Newlines must be encoded as \n, not embedded literally
-        Assert.IsFalse(jsString.Contains('\n'), "Literal newlines in JS string literal are invalid");
-        StringAssert.Contains(jsString, "\\n", "Newlines must be encoded as \\n");
+        Assert.DoesNotContain('\n', jsString, "Literal newlines in JS string literal are invalid");
+        Assert.Contains("\\n", jsString, "Newlines must be encoded as \\n");
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -567,14 +567,14 @@ public sealed class MermaidSequenceSerializerTests
     public void CallSequence_DefaultParticipants_IsEmpty()
     {
         var seq = new CallSequence();
-        Assert.AreEqual(0, seq.Participants.Count);
+        Assert.IsEmpty(seq.Participants);
     }
 
     [TestMethod]
     public void CallSequence_DefaultRootCalls_IsEmpty()
     {
         var seq = new CallSequence();
-        Assert.AreEqual(0, seq.RootCalls.Count);
+        Assert.IsEmpty(seq.RootCalls);
     }
 
     [TestMethod]
@@ -590,6 +590,6 @@ public sealed class MermaidSequenceSerializerTests
     {
         var node = Leaf("A", "B", "M");
         Assert.IsNotNull(node.NestedCalls);
-        Assert.AreEqual(0, node.NestedCalls.Count);
+        Assert.IsEmpty(node.NestedCalls);
     }
 }

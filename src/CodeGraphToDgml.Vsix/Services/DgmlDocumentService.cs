@@ -28,7 +28,7 @@ internal sealed class DgmlDocumentService
         var runningDocumentTable = await _package.GetServiceAsync(typeof(SVsRunningDocumentTable)).ConfigureAwait(true) as IVsRunningDocumentTable;
         if (runningDocumentTable is null)
         {
-            return Array.Empty<OpenDgmlDocument>();
+            return [];
         }
 
         ErrorHandler.ThrowOnFailure(runningDocumentTable.GetRunningDocumentsEnum(out var enumerator));

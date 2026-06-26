@@ -1064,7 +1064,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             int depth)
         {
             if (depth >= normalizedOptions.MaxDepth)
-                return Array.Empty<CallSequenceCallNode>();
+                return [];
 
             progress?.Report(new TraversalProgress("Traversing callees", depth, nodeCount, caller.ToDisplayString()));
 
@@ -1090,7 +1090,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 if (visited.Add(calleeId))
                     nested = await BuildCallsAsync(normalized, calleeParticipantId, depth + 1).ConfigureAwait(false);
                 else
-                    nested = Array.Empty<CallSequenceCallNode>();
+                    nested = [];
 
                 nodes.Add(new CallSequenceCallNode(
                     callerParticipantId,

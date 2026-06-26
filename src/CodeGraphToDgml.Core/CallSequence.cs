@@ -14,7 +14,7 @@ public sealed class CallSequence
 {
     public string Title { get; init; } = string.Empty;
 
-    public IReadOnlyList<CallSequenceParticipant> Participants { get; init; } = System.Array.Empty<CallSequenceParticipant>();
+    public IReadOnlyList<CallSequenceParticipant> Participants { get; init; } = [];
 
-    public IReadOnlyList<CallSequenceCallNode> RootCalls { get; init; } = System.Array.Empty<CallSequenceCallNode>();
+    public IReadOnlyList<CallSequenceCallNode> RootCalls { get; init; } = [];
 }

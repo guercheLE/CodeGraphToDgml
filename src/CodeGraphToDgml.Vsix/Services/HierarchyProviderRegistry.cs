@@ -10,10 +10,10 @@ internal sealed class HierarchyProviderRegistry
 
     public HierarchyProviderRegistry(ToolkitPackage package)
     {
-        _providers = new IHierarchyProvider[]
-        {
+        _providers =
+        [
             new RoslynCallHierarchyProvider(package),
-        };
+        ];
     }
 
     public bool SupportsFilePath(string? filePath)
