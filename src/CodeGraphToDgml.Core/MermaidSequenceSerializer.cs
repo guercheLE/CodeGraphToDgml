@@ -4,7 +4,7 @@ namespace CodeGraphToDgml.Core;
 
 public sealed class MermaidSequenceSerializer
 {
-    public string Serialize(CallSequence sequence)
+    public string Serialize(CallSequence sequence, bool stackedActivationBars = true)
     {
         var sb = new StringBuilder();
         sb.AppendLine("sequenceDiagram");
@@ -21,7 +21,7 @@ public sealed class MermaidSequenceSerializer
             sb.AppendLine();
 
         foreach (var call in sequence.RootCalls)
-            EmitCall(sb, call);
+            EmitCall(sb, call, stackedActivationBars);
 
         while (sb.Length > 0 && (sb[sb.Length - 1] == '\r' || sb[sb.Length - 1] == '\n'))
             sb.Length--;
@@ -29,23 +29,25 @@ public sealed class MermaidSequenceSerializer
         return sb.ToString();
     }
 
-    private static void EmitCall(StringBuilder sb, CallSequenceCallNode call)
+    private static void EmitCall(StringBuilder sb, CallSequenceCallNode call, bool stackedActivationBars)
     {
         var from = call.CallerParticipantId;
         var to = call.CalleeParticipantId;
         var label = EscapeLabel(call.MessageLabel);
         var hasNested = call.NestedCalls.Count > 0;
 
-        if (hasNested)
+        if (hasNested && stackedActivationBars)
         {
             sb.Append("    ").Append(from).Append("->>+").Append(to).Append(": ").AppendLine(label);
             foreach (var nested in call.NestedCalls)
-                EmitCall(sb, nested);
+                EmitCall(sb, nested, stackedActivationBars);
             sb.Append("    ").Append(to).Append("-->>-").Append(from).AppendLine(": ");
         }
         else
         {
             sb.Append("    ").Append(from).Append("->>").Append(to).Append(": ").AppendLine(label);
+            foreach (var nested in call.NestedCalls)
+                EmitCall(sb, nested, stackedActivationBars);
         }
     }
 
@@ -56,20 +58,20 @@ public sealed class MermaidSequenceSerializer
             .Replace(">", "#gt;")
             .Replace("&", "#amp;");
 
-    public string BuildMarkdown(CallSequence sequence)
+    public string BuildMarkdown(CallSequence sequence, bool stackedActivationBars = true)
     {
         var sb = new StringBuilder();
         sb.Append("# Sequence: ").AppendLine(sequence.Title);
         sb.AppendLine();
         sb.AppendLine("```mermaid");
-        sb.AppendLine(Serialize(sequence));
+        sb.AppendLine(Serialize(sequence, stackedActivationBars));
         sb.AppendLine("```");
         return sb.ToString();
     }
 
-    public string BuildHtml(CallSequence sequence)
+    public string BuildHtml(CallSequence sequence, bool stackedActivationBars = true)
     {
-        var mermaid = Serialize(sequence);
+        var mermaid = Serialize(sequence, stackedActivationBars);
         var jsSource = ToJsString(mermaid);
         var htmlTitle = EscapeHtml(sequence.Title);
 

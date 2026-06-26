@@ -116,6 +116,12 @@ internal class General : BaseOptionModel<General>
     [TypeConverter(typeof(EnumConverter))]
     public SequenceDiagramOutputFormat SequenceDiagramOutputFormat { get; set; } = SequenceDiagramOutputFormat.Markdown;
 
+    [Category("Sequence Diagram")]
+    [DisplayName("Stacked activation bars")]
+    [Description("When enabled, nested calls show stacked activation bars on lifelines (using the +/- Mermaid notation). Recommended off for Markdown, since older bundled Mermaid versions in editor extensions may not render them correctly. Enable when targeting Html or Both, or when your Markdown preview bundles Mermaid v11 or later.")]
+    [DefaultValue(false)]
+    public bool SequenceDiagramStackedActivationBars { get; set; }
+
     [Category("UI")]
     [DisplayName("Activate result document")]
     [Description("When enabled, the DGML document is brought to the front after it is updated.")]

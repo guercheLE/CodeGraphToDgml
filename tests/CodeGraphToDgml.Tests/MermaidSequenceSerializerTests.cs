@@ -106,6 +106,17 @@ public sealed class MermaidSequenceSerializerTests
     }
 
     [TestMethod]
+    public void Serialize_NestedCall_StackedBarsOff_UsesPlainArrows()
+    {
+        var result = Serializer.Serialize(LinearChain(), stackedActivationBars: false);
+
+        StringAssert.Contains(result, "ClassA->>ClassB: DoB");
+        StringAssert.Contains(result, "ClassB->>ClassC: DoC");
+        Assert.IsFalse(result.Contains("->>+"), "No activation markers when stacked bars off");
+        Assert.IsFalse(result.Contains("-->>-"), "No deactivation markers when stacked bars off");
+    }
+
+    [TestMethod]
     public void Serialize_SelfCall_SameParticipantBothEnds()
     {
         var sequence = new CallSequence
@@ -116,6 +127,45 @@ public sealed class MermaidSequenceSerializerTests
 
         var result = Serializer.Serialize(sequence);
         StringAssert.Contains(result, "MyClass->>MyClass: Helper");
+    }
+
+    [TestMethod]
+    public void Serialize_NestedSelfCall_StackedBarsOff_NoActivationMarkers()
+    {
+        var sequence = new CallSequence
+        {
+            Participants = new[] { P("A", "A"), P("B", "B") },
+            RootCalls = new[]
+            {
+                Nested("A", "A", "SelfWithNested",
+                    Leaf("A", "B", "Inner")),
+            },
+        };
+
+        var result = Serializer.Serialize(sequence, stackedActivationBars: false);
+        StringAssert.Contains(result, "A->>A: SelfWithNested");
+        StringAssert.Contains(result, "A->>B: Inner");
+        Assert.IsFalse(result.Contains("->>+"), "No activation markers when stacked bars off");
+        Assert.IsFalse(result.Contains("-->>-"), "No deactivation markers when stacked bars off");
+    }
+
+    [TestMethod]
+    public void Serialize_NestedSelfCall_StackedBarsOn_UsesActivationMarkers()
+    {
+        var sequence = new CallSequence
+        {
+            Participants = new[] { P("A", "A"), P("B", "B") },
+            RootCalls = new[]
+            {
+                Nested("A", "A", "SelfWithNested",
+                    Leaf("A", "B", "Inner")),
+            },
+        };
+
+        var result = Serializer.Serialize(sequence, stackedActivationBars: true);
+        StringAssert.Contains(result, "A->>+A: SelfWithNested");
+        StringAssert.Contains(result, "A->>B: Inner");
+        StringAssert.Contains(result, "A-->>-A: ");
     }
 
     // ──────────────────────────────────────────────────────────────────────────

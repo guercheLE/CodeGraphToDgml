@@ -76,6 +76,7 @@ internal sealed class TraverseDownToSequenceOperationService
             var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmssfff");
             var serializer = new MermaidSequenceSerializer();
             var format = options.SequenceDiagramOutputFormat;
+            var stackedActivationBars = options.SequenceDiagramStackedActivationBars;
 
             string? mdPath = null;
             string? htmlPath = null;
@@ -87,13 +88,13 @@ internal sealed class TraverseDownToSequenceOperationService
                 if (format == SequenceDiagramOutputFormat.Markdown || format == SequenceDiagramOutputFormat.Both)
                 {
                     mdPath = Path.Combine(tempDir, $"CodeSequence-{timestamp}.md");
-                    File.WriteAllText(mdPath, serializer.BuildMarkdown(sequence), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    File.WriteAllText(mdPath, serializer.BuildMarkdown(sequence, stackedActivationBars), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
                 }
 
                 if (format == SequenceDiagramOutputFormat.Html || format == SequenceDiagramOutputFormat.Both)
                 {
                     htmlPath = Path.Combine(tempDir, $"CodeSequence-{timestamp}.html");
-                    File.WriteAllText(htmlPath, serializer.BuildHtml(sequence), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    File.WriteAllText(htmlPath, serializer.BuildHtml(sequence, stackedActivationBars), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
                 }
             }).ConfigureAwait(false);
 
