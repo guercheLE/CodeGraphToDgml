@@ -942,4 +942,307 @@ public sealed class MermaidSequenceSerializerTests
         Assert.IsGreaterThanOrEqualTo(0, firstCallIdx, "Missing first call arrow");
         Assert.IsLessThan(firstCallIdx, activateIdx, "'activate A' must precede the first call arrow");
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Item 3: business-flow-aware splitting (low-overlap heuristic + message cap)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    // Three root calls, each with 3 distinct participants and zero participant overlap with
+    // the others. A pure participant-count-only greedy split at maxParticipants=6 would merge
+    // Call1+Call2 into one phase (3+3=6, not over cap) then Call3 alone — 2 phases. The
+    // low-overlap heuristic should instead cut between every pair (0% overlap, 3 "meaningful"
+    // participants already accumulated each time), producing 3 phases.
+    private static CallSequence LowOverlapPhaseSequence() => new()
+    {
+        Title = "Root",
+        Participants =
+        [
+            P("A", "A"), P("B", "B"), P("C", "C"),
+            P("D", "D"), P("E", "E"), P("F", "F"),
+            P("G", "G"), P("H", "H"), P("I", "I"),
+        ],
+        RootCalls =
+        [
+            // Each root call has its own caller (A/D/G), so the three calls share no
+            // participants at all — a genuinely disjoint fixture, unlike a shared-root-caller
+            // design that would accidentally keep overlap non-zero.
+            Nested("A", "B", "Call1", Leaf("B", "C", "Sub1")),
+            Nested("D", "E", "Call2", Leaf("E", "F", "Sub2")),
+            Nested("G", "H", "Call3", Leaf("H", "I", "Sub3")),
+        ],
+    };
+
+    [TestMethod]
+    public void BuildMarkdown_LowOverlapCalls_SplitsMoreThanParticipantCapAlone()
+    {
+        // maxParticipantsPerDiagram=6 would allow Call1+Call2 to share a phase by count alone
+        // (3+3=6, not over cap) — the low-overlap heuristic should still split them apart.
+        var result = Serializer.BuildMarkdown(LowOverlapPhaseSequence(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 6);
+
+        var headingCount = result.Split('\n').Count(l => l.TrimStart().StartsWith("## Part"));
+        Assert.AreEqual(3, headingCount,
+            "Three mutually disjoint calls should each land in their own phase due to low participant overlap, " +
+            "not be greedily packed two-per-phase by participant count alone.");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_LowOverlapCalls_EachPartHasOwnDistinctParticipants()
+    {
+        var result = Serializer.BuildMarkdown(LowOverlapPhaseSequence(),
+            stackedActivationBars: false, autoNumber: false, maxParticipantsPerDiagram: 6);
+
+        Assert.Contains("Call1", result);
+        Assert.Contains("Call2", result);
+        Assert.Contains("Call3", result);
+    }
+
+    // A handful of small calls sharing a common caller "A" (so the accumulating segment never
+    // exceeds MinPhaseParticipantsForSplit=3 "meaningful" participants by the time the third call
+    // is evaluated, and "A" itself keeps overlap non-trivial) must not be fragmented purely by
+    // the low-overlap heuristic. Participants list is padded with unused entries so the sequence
+    // total exceeds maxParticipantsPerDiagram and genuinely enters segmentation, rather than the
+    // test passing trivially via BuildSections' early single-diagram bypass.
+    private static CallSequence SmallDisjointCallsUnderThresholdSequence() => new()
+    {
+        Title = "Root",
+        Participants =
+        [
+            P("A", "A"), P("B", "B"), P("C", "C"), P("D", "D"),
+            P("X1", "X1"), P("X2", "X2"), P("X3", "X3"), P("X4", "X4"), P("X5", "X5"),
+        ],
+        RootCalls =
+        [
+            Leaf("A", "B", "First"),
+            Leaf("A", "C", "Second"),
+            Leaf("A", "D", "Third"),
+        ],
+    };
+
+    [TestMethod]
+    public void BuildMarkdown_FewSmallCallsSharingCaller_NotFragmentedByOverlapHeuristic()
+    {
+        // 9 declared participants > maxParticipantsPerDiagram(8) forces entry into segmentation,
+        // but First/Second/Third (only ever touching A,B / A,C / A,D) never individually exceed
+        // the cap and share caller A, so neither the participant cap nor the low-overlap
+        // heuristic should fragment them.
+        var result = Serializer.BuildMarkdown(SmallDisjointCallsUnderThresholdSequence(),
+            stackedActivationBars: false, autoNumber: false, maxParticipantsPerDiagram: 8);
+
+        var headingCount = result.Split('\n').Count(l => l.TrimStart().StartsWith("## Part"));
+        Assert.AreEqual(0, headingCount, "Should remain a single (unsplit) diagram — no ## Part headings.");
+    }
+
+    // Many calls between the same two participants (100% overlap every time, so the low-overlap
+    // heuristic never fires) — isolates the message-count cap as the sole driver of splitting.
+    private static CallSequence MessageCountSequence()
+    {
+        var calls = Enumerable.Range(1, 10)
+            .Select(i => Leaf("A", "B", $"Call{i}"))
+            .ToArray();
+
+        return new CallSequence
+        {
+            Title = "Root",
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = calls,
+        };
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_MessageCountExceedsCap_SplitsEvenWithoutParticipantCap()
+    {
+        // stackedBars=true: each of the 10 calls contributes 2 arrows (call+return) = 20 total.
+        // maxMessagesPerDiagram=8 should force a split despite only 2 participants total
+        // (well under any reasonable participant cap, and no participant cap is even set here).
+        var result = Serializer.BuildMarkdown(MessageCountSequence(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 0, maxMessagesPerDiagram: 8);
+
+        var headingCount = result.Split('\n').Count(l => l.TrimStart().StartsWith("## Part"));
+        Assert.IsGreaterThan(1, headingCount, "Message cap alone should force multiple sections.");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_MessageCountUnderCap_RemainsSingleDiagram()
+    {
+        var result = Serializer.BuildMarkdown(MessageCountSequence(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 0, maxMessagesPerDiagram: 100);
+
+        var headingCount = result.Split('\n').Count(l => l.TrimStart().StartsWith("## Part"));
+        Assert.AreEqual(0, headingCount, "Should remain a single (unsplit) diagram when under the message cap.");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_NoCapsConfigured_RemainsSingleDiagram()
+    {
+        // Sanity check: with neither cap set (both default to 0/off), splitting must never occur,
+        // regardless of how large the sequence is.
+        var result = Serializer.BuildMarkdown(MessageCountSequence(), stackedActivationBars: true, autoNumber: false);
+
+        var headingCount = result.Split('\n').Count(l => l.TrimStart().StartsWith("## Part"));
+        Assert.AreEqual(0, headingCount);
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Item 2: root/entry-method activation bar via synthetic «Caller» actor
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private static CallSequence LinearChainWithRoot() => new()
+    {
+        Title = "ClassA.btnLiberar_Click",
+        Participants = [P("ClassA", "ClassA"), P("ClassB", "ClassB"), P("ClassC", "ClassC")],
+        RootCalls =
+        [
+            Nested("ClassA", "ClassB", "DoB",
+                Leaf("ClassB", "ClassC", "DoC")),
+        ],
+        RootParticipantId = "ClassA",
+        RootMethodLabel = "btnLiberar_Click",
+    };
+
+    [TestMethod]
+    public void Serialize_WithoutRootParticipant_NoCallerActorEmitted()
+    {
+        // Default/legacy CallSequences (RootParticipantId unset) render exactly as before item 2.
+        var result = Serializer.Serialize(LinearChain());
+        Assert.DoesNotContain("actor ", result);
+        Assert.DoesNotContain("Caller", result);
+    }
+
+    [TestMethod]
+    public void Serialize_WithRootParticipant_EmitsCallerActorBeforeParticipants()
+    {
+        var result = Serializer.Serialize(LinearChainWithRoot());
+        Assert.Contains("actor Caller as «Caller»", result);
+
+        int actorIdx = result.IndexOf("actor Caller", StringComparison.Ordinal);
+        int firstParticipantIdx = result.IndexOf("participant ClassA", StringComparison.Ordinal);
+        Assert.IsLessThan(firstParticipantIdx, actorIdx, "Caller actor should be declared before real participants.");
+    }
+
+    [TestMethod]
+    public void Serialize_WithRootParticipant_StackedBarsOn_WrapsRootMethodWithActivation()
+    {
+        var result = Serializer.Serialize(LinearChainWithRoot(), stackedActivationBars: true);
+
+        Assert.Contains("Caller->>+ClassA: btnLiberar_Click", result);
+        Assert.Contains("ClassA-->>-Caller: ", result);
+
+        var lines = result.Split('\n').Select(l => l.Trim()).ToArray();
+        int open = Array.FindIndex(lines, l => l.StartsWith("Caller->>+ClassA"));
+        int inner = Array.FindIndex(lines, l => l.StartsWith("ClassA->>+ClassB"));
+        int close = Array.FindIndex(lines, l => l.StartsWith("ClassA-->>-Caller"));
+
+        Assert.IsGreaterThanOrEqualTo(0, open, "Missing Caller opening call");
+        Assert.IsGreaterThanOrEqualTo(0, inner, "Missing inner ClassA->>ClassB call");
+        Assert.IsGreaterThanOrEqualTo(0, close, "Missing Caller closing return");
+        Assert.IsLessThan(inner, open, "Caller must call the entry method before it calls anything else");
+        Assert.IsLessThan(close, inner, "Entry method's own calls must finish before Caller's activation closes");
+    }
+
+    [TestMethod]
+    public void Serialize_WithRootParticipant_StackedBarsOff_PlainArrowNoReturnLine()
+    {
+        var result = Serializer.Serialize(LinearChainWithRoot(), stackedActivationBars: false);
+
+        Assert.Contains("Caller->>ClassA: btnLiberar_Click", result);
+        Assert.DoesNotContain("Caller->>+", result, "No activation marker when stacked bars off");
+        Assert.DoesNotContain("-->>-Caller", result, "No return line for Caller when stacked bars off");
+    }
+
+    [TestMethod]
+    public void Serialize_WithRootParticipant_RealParticipantNamedCaller_SyntheticActorGetsDistinctId()
+    {
+        var sequence = new CallSequence
+        {
+            Participants = [P("Caller", "Caller"), P("B", "B")],
+            RootCalls = [Leaf("Caller", "B", "DoWork")],
+            RootParticipantId = "Caller",
+            RootMethodLabel = "Entry",
+        };
+
+        var result = Serializer.Serialize(sequence);
+
+        Assert.Contains("actor Caller_1 as «Caller»", result, "Synthetic actor must not collide with the real 'Caller' participant");
+        Assert.Contains("participant Caller as Caller", result, "Real participant named 'Caller' must remain untouched");
+        Assert.Contains("Caller_1->>+Caller: Entry", result);
+    }
+
+    // Three root calls sharing the same caller "Entry" (as real traversal data always does —
+    // every RootCalls entry is a direct call FROM the entry method), each with its own disjoint
+    // pair of participants, forced into 3 separate phases by a tight participant cap.
+    private static CallSequence ThreePhaseSequenceWithRoot() => new()
+    {
+        Title = "Root",
+        Participants =
+        [
+            P("Entry", "Entry"),
+            P("A", "A"), P("B", "B"),
+            P("C", "C"), P("D", "D"),
+            P("E", "E"), P("F", "F"),
+        ],
+        RootCalls =
+        [
+            Nested("Entry", "A", "Call1", Leaf("A", "B", "Sub1")),
+            Nested("Entry", "C", "Call2", Leaf("C", "D", "Sub2")),
+            Nested("Entry", "E", "Call3", Leaf("E", "F", "Sub3")),
+        ],
+        RootParticipantId = "Entry",
+        RootMethodLabel = "EntryMethod",
+    };
+
+    [TestMethod]
+    public void BuildMarkdown_MultiSection_CallerActorDeclaredInEverySegment()
+    {
+        var result = Serializer.BuildMarkdown(ThreePhaseSequenceWithRoot(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 3);
+
+        var headingCount = result.Split('\n').Count(l => l.TrimStart().StartsWith("## Part"));
+        Assert.AreEqual(3, headingCount, "Expected exactly 3 phases given the tight participant cap.");
+
+        int actorDeclCount = result.Split('\n').Count(l => l.Trim() == "actor Caller as «Caller»");
+        Assert.AreEqual(3, actorDeclCount, "The «Caller» actor must be declared in every segment.");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_MultiSection_FirstSegmentHasOpeningCallOnly()
+    {
+        var result = Serializer.BuildMarkdown(ThreePhaseSequenceWithRoot(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 3);
+
+        var sections = result.Split(new[] { "## Part" }, StringSplitOptions.None);
+        // sections[0] is the markdown preamble before "## Part 1"; sections[1] is Part 1's content.
+        var firstSection = sections[1];
+
+        Assert.Contains("Caller->>+Entry: EntryMethod", firstSection);
+        Assert.DoesNotContain("Entry-->>-Caller", firstSection, "First segment must not close the Caller activation.");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_MultiSection_LastSegmentHasClosingReturnOnly()
+    {
+        var result = Serializer.BuildMarkdown(ThreePhaseSequenceWithRoot(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 3);
+
+        var sections = result.Split(new[] { "## Part" }, StringSplitOptions.None);
+        var lastSection = sections[^1];
+
+        Assert.Contains("Entry-->>-Caller: ", lastSection);
+        Assert.DoesNotContain("Caller->>+Entry", lastSection, "Last segment must not re-open the Caller activation.");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_MultiSection_MiddleSegmentOnlyActivatesAndDeactivatesCaller()
+    {
+        var result = Serializer.BuildMarkdown(ThreePhaseSequenceWithRoot(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 3);
+
+        var sections = result.Split(new[] { "## Part" }, StringSplitOptions.None);
+        var middleSection = sections[2]; // "## Part 2" content
+
+        Assert.Contains("activate Caller", middleSection);
+        Assert.Contains("deactivate Caller", middleSection);
+        Assert.DoesNotContain("Caller->>+Entry", middleSection, "Middle segment must not re-open the Caller activation with an arrow.");
+        Assert.DoesNotContain("Entry-->>-Caller", middleSection, "Middle segment must not close the Caller activation with an arrow.");
+    }
 }
