@@ -17,4 +17,18 @@ public sealed class CallSequence
     public IReadOnlyList<CallSequenceParticipant> Participants { get; init; } = [];
 
     public IReadOnlyList<CallSequenceCallNode> RootCalls { get; init; } = [];
+
+    /// <summary>
+    /// The participant id of the root/entry method itself (i.e. what would be
+    /// <c>RootCalls[0].CallerParticipantId</c> by construction, but explicit so it's available
+    /// even when <see cref="RootCalls"/> is empty). Used to give the entry method its own
+    /// activation bar via a synthetic «Caller» actor.
+    /// </summary>
+    public string RootParticipantId { get; init; } = string.Empty;
+
+    /// <summary>
+    /// The bare method-name label of the root/entry method (e.g. "btnLiberar_Click"), used as
+    /// the message label on the synthetic «Caller» actor's call into the entry method.
+    /// </summary>
+    public string RootMethodLabel { get; init; } = string.Empty;
 }

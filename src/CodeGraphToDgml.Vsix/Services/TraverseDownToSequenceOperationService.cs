@@ -79,6 +79,7 @@ internal sealed class TraverseDownToSequenceOperationService
             var stackedActivationBars = options.SequenceDiagramStackedActivationBars;
             var autoNumber = options.SequenceDiagramAutoNumber;
             var maxParticipantsPerDiagram = options.SequenceDiagramMaxParticipantsPerDiagram;
+            var maxMessagesPerDiagram = options.SequenceDiagramMaxMessagesPerDiagram;
 
             string? mdPath = null;
             string? htmlPath = null;
@@ -90,13 +91,13 @@ internal sealed class TraverseDownToSequenceOperationService
                 if (format == SequenceDiagramOutputFormat.Markdown || format == SequenceDiagramOutputFormat.Both)
                 {
                     mdPath = Path.Combine(tempDir, $"CodeSequence-{timestamp}.md");
-                    File.WriteAllText(mdPath, serializer.BuildMarkdown(sequence, stackedActivationBars, autoNumber, maxParticipantsPerDiagram), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    File.WriteAllText(mdPath, serializer.BuildMarkdown(sequence, stackedActivationBars, autoNumber, maxParticipantsPerDiagram, maxMessagesPerDiagram), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
                 }
 
                 if (format == SequenceDiagramOutputFormat.Html || format == SequenceDiagramOutputFormat.Both)
                 {
                     htmlPath = Path.Combine(tempDir, $"CodeSequence-{timestamp}.html");
-                    File.WriteAllText(htmlPath, serializer.BuildHtml(sequence, stackedActivationBars, autoNumber, maxParticipantsPerDiagram), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    File.WriteAllText(htmlPath, serializer.BuildHtml(sequence, stackedActivationBars, autoNumber, maxParticipantsPerDiagram, maxMessagesPerDiagram), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
                 }
             }).ConfigureAwait(false);
 

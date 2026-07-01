@@ -15,6 +15,16 @@ public sealed class MermaidSequenceSerializer
         if (autoNumber)
             sb.AppendLine("    autonumber");
 
+        // Item 2: give the root/entry method its own activation bar by wrapping RootCalls with a
+        // synthetic external actor. Only when RootParticipantId is populated (i.e. the sequence
+        // came from the real traversal path) — an unset RootParticipantId means "no root concept
+        // declared," so hand-built/legacy CallSequences render exactly as before.
+        bool hasCaller = !string.IsNullOrEmpty(sequence.RootParticipantId) && sequence.RootCalls.Count > 0;
+        var callerId = hasCaller ? GetCallerActorId(sequence.Participants) : string.Empty;
+
+        if (hasCaller)
+            sb.Append("    actor ").Append(callerId).Append(" as ").AppendLine(CallerActorLabel);
+
         foreach (var p in sequence.Participants)
         {
             sb.Append("    participant ");
@@ -26,8 +36,15 @@ public sealed class MermaidSequenceSerializer
         if (sequence.Participants.Count > 0 && sequence.RootCalls.Count > 0)
             sb.AppendLine();
 
-        foreach (var call in sequence.RootCalls)
-            EmitCall(sb, call, stackedActivationBars);
+        if (hasCaller)
+        {
+            EmitRootCallerWrap(sb, callerId, sequence, stackedActivationBars);
+        }
+        else
+        {
+            foreach (var call in sequence.RootCalls)
+                EmitCall(sb, call, stackedActivationBars);
+        }
 
         while (sb.Length > 0 && (sb[sb.Length - 1] == '\r' || sb[sb.Length - 1] == '\n'))
             sb.Length--;
@@ -35,9 +52,49 @@ public sealed class MermaidSequenceSerializer
         return sb.ToString();
     }
 
-    public string BuildMarkdown(CallSequence sequence, bool stackedActivationBars = true, bool autoNumber = false, int maxParticipantsPerDiagram = 0)
+    // ── Root «Caller» actor ───────────────────────────────────────────────────
+
+    private const string CallerActorLabel = "«Caller»"; // «Caller»
+
+    private static string GetCallerActorId(IReadOnlyList<CallSequenceParticipant> participants)
     {
-        var sections = BuildSections(sequence, stackedActivationBars, autoNumber, maxParticipantsPerDiagram);
+        var existingIds = new HashSet<string>(participants.Select(p => p.Id), StringComparer.Ordinal);
+        if (!existingIds.Contains("Caller"))
+            return "Caller";
+
+        int suffix = 1;
+        string candidate;
+        do
+        {
+            candidate = "Caller_" + suffix;
+            suffix++;
+        } while (existingIds.Contains(candidate));
+
+        return candidate;
+    }
+
+    private static void EmitRootCallerWrap(StringBuilder sb, string callerId, CallSequence sequence, bool stackedActivationBars)
+    {
+        var rootLabel = EscapeLabel(sequence.RootMethodLabel);
+
+        if (stackedActivationBars)
+        {
+            sb.Append("    ").Append(callerId).Append("->>+").Append(sequence.RootParticipantId).Append(": ").AppendLine(rootLabel);
+            foreach (var call in sequence.RootCalls)
+                EmitCall(sb, call, stackedActivationBars);
+            sb.Append("    ").Append(sequence.RootParticipantId).Append("-->>-").Append(callerId).AppendLine(": ");
+        }
+        else
+        {
+            sb.Append("    ").Append(callerId).Append("->>").Append(sequence.RootParticipantId).Append(": ").AppendLine(rootLabel);
+            foreach (var call in sequence.RootCalls)
+                EmitCall(sb, call, stackedActivationBars);
+        }
+    }
+
+    public string BuildMarkdown(CallSequence sequence, bool stackedActivationBars = true, bool autoNumber = false, int maxParticipantsPerDiagram = 0, int maxMessagesPerDiagram = 0)
+    {
+        var sections = BuildSections(sequence, stackedActivationBars, autoNumber, maxParticipantsPerDiagram, maxMessagesPerDiagram);
 
         var sb = new StringBuilder();
         sb.Append("# Sequence: ").AppendLine(sequence.Title);
@@ -65,9 +122,9 @@ public sealed class MermaidSequenceSerializer
         return sb.ToString();
     }
 
-    public string BuildHtml(CallSequence sequence, bool stackedActivationBars = true, bool autoNumber = false, int maxParticipantsPerDiagram = 0)
+    public string BuildHtml(CallSequence sequence, bool stackedActivationBars = true, bool autoNumber = false, int maxParticipantsPerDiagram = 0, int maxMessagesPerDiagram = 0)
     {
-        var sections = BuildSections(sequence, stackedActivationBars, autoNumber, maxParticipantsPerDiagram);
+        var sections = BuildSections(sequence, stackedActivationBars, autoNumber, maxParticipantsPerDiagram, maxMessagesPerDiagram);
         var htmlTitle = EscapeHtml(sequence.Title);
 
         if (sections.Count > 1)
@@ -185,21 +242,35 @@ public sealed class MermaidSequenceSerializer
         public string? PrevTitle { get; set; }
         public string? NextTitle { get; set; }
         public List<CallSequenceCallNode> VirtualRootCalls { get; set; } = new List<CallSequenceCallNode>();
+
+        // Item 2: whether this is the first/last segment of the whole (possibly multi-part)
+        // diagram — used to decide where the synthetic «Caller» actor's opening/closing arrows
+        // land vs. where it merely stays "in flight" via activate/deactivate.
+        public bool IsFirstSegment { get; set; }
+        public bool IsLastSegment { get; set; }
     }
 
     private sealed record DiagramSection(string Heading, string Content, SegmentPlan? Plan = null);
 
     // ── Section building ──────────────────────────────────────────────────────
 
-    private List<DiagramSection> BuildSections(CallSequence sequence, bool stackedBars, bool autoNumber, int maxPerDiagram)
+    private List<DiagramSection> BuildSections(CallSequence sequence, bool stackedBars, bool autoNumber, int maxPerDiagram, int maxMessagesPerDiagram = 0)
     {
-        if (maxPerDiagram <= 0 || sequence.Participants.Count <= maxPerDiagram)
+        if (maxPerDiagram <= 0 && maxMessagesPerDiagram <= 0)
             return [new DiagramSection("", Serialize(sequence, stackedBars, autoNumber))];
 
         if (sequence.RootCalls.Count == 0)
             return [new DiagramSection("", Serialize(sequence, stackedBars, autoNumber))];
 
-        var plans = ComputeSegmentPlans(sequence, maxPerDiagram, stackedBars);
+        var maxParticipants = maxPerDiagram > 0 ? maxPerDiagram : int.MaxValue;
+        var maxMessages = maxMessagesPerDiagram > 0 ? maxMessagesPerDiagram : int.MaxValue;
+
+        bool participantsFit = sequence.Participants.Count <= maxParticipants;
+        bool messagesFit = CountArrows(sequence.RootCalls, stackedBars) <= maxMessages;
+        if (participantsFit && messagesFit)
+            return [new DiagramSection("", Serialize(sequence, stackedBars, autoNumber))];
+
+        var plans = ComputeSegmentPlans(sequence, maxParticipants, maxMessages, stackedBars);
 
         if (plans.Count <= 1)
             return [new DiagramSection("", Serialize(sequence, stackedBars, autoNumber))];
@@ -231,10 +302,28 @@ public sealed class MermaidSequenceSerializer
 
     // ── Segment plan computation ──────────────────────────────────────────────
 
-    private static List<SegmentPlan> ComputeSegmentPlans(CallSequence sequence, int maxParticipants, bool stackedBars)
+    // Heuristic knobs for the "business-flow boundary" signal in ShouldCutBefore. Deliberately
+    // conservative and grounded in the call graph's actual structure (participant overlap)
+    // rather than names/comments — expect to tune these against real large diagrams.
+    private const double LowOverlapThreshold = 0.2;
+    private const int MinPhaseParticipantsForSplit = 3;
+
+    private static readonly HashSet<string> NoBoundary = new(StringComparer.Ordinal);
+
+    private static List<SegmentPlan> ComputeSegmentPlans(CallSequence sequence, int maxParticipants, int maxMessages, bool stackedBars)
     {
-        // Phase 1: group root calls into natural phases (greedy by participant count)
-        var phases = GroupRootCallsIntoPhases(sequence.RootCalls, maxParticipants);
+        // Item 2: the root method's own participant is treated as an always-present boundary
+        // across top-level phases too (mirroring how a split parent's caller/callee are treated
+        // for sub-parts below) — it keeps the «Caller» wrap's target participant declared in
+        // every phase, and correctly excludes it from the low-overlap heuristic's "meaningful
+        // participants" count. Empty (not {""}) when RootParticipantId is unset (legacy/hand-built
+        // sequences), so behavior is unchanged for callers that don't populate it.
+        var rootBoundary = string.IsNullOrEmpty(sequence.RootParticipantId)
+            ? NoBoundary
+            : new HashSet<string>(StringComparer.Ordinal) { sequence.RootParticipantId };
+
+        // Phase 1: group root calls into natural phases.
+        var phases = SegmentCalls(sequence.RootCalls, rootBoundary, maxParticipants, maxMessages, stackedBars);
 
         var allPlans = new List<SegmentPlan>();
         int phaseNumber = 1;
@@ -243,6 +332,7 @@ public sealed class MermaidSequenceSerializer
         foreach (var phase in phases)
         {
             var phaseParts = GetCallListParticipants(phase);
+            phaseParts.UnionWith(rootBoundary);
 
             List<(List<CallSequenceCallNode> Calls, HashSet<string> Participants)> subSegs;
             if (phaseParts.Count <= maxParticipants)
@@ -251,7 +341,36 @@ public sealed class MermaidSequenceSerializer
             }
             else
             {
-                subSegs = SplitPhaseIntoSubParts(phase, maxParticipants);
+                // The only way a phase can still exceed the cap here is a single root call whose
+                // own subtree alone exceeds it (SegmentCalls already keeps every multi-call phase
+                // under the cap) — split that call's nested calls instead, keeping its own
+                // caller/callee as an always-present boundary across every sub-part.
+                var parentCall = phase[0];
+                var boundary = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    parentCall.CallerParticipantId,
+                    parentCall.CalleeParticipantId,
+                };
+
+                var subPhases = parentCall.NestedCalls.Count == 0
+                    ? [new List<CallSequenceCallNode>(phase)]
+                    : SegmentCalls(parentCall.NestedCalls, boundary, maxParticipants, maxMessages, stackedBars);
+
+                if (subPhases.Count <= 1)
+                {
+                    subSegs = new List<(List<CallSequenceCallNode>, HashSet<string>)> { (phase, phaseParts) };
+                }
+                else
+                {
+                    subSegs = subPhases
+                        .Select(calls =>
+                        {
+                            var parts = GetCallListParticipants(calls);
+                            parts.UnionWith(boundary);
+                            return (calls, parts);
+                        })
+                        .ToList();
+                }
             }
 
             bool hasSubParts = subSegs.Count > 1;
@@ -305,118 +424,87 @@ public sealed class MermaidSequenceSerializer
                 .ToList();
         }
 
+        if (allPlans.Count > 0)
+        {
+            allPlans[0].IsFirstSegment = true;
+            allPlans[allPlans.Count - 1].IsLastSegment = true;
+        }
+
         return allPlans;
     }
 
-    private static List<List<CallSequenceCallNode>> GroupRootCallsIntoPhases(
-        IReadOnlyList<CallSequenceCallNode> rootCalls,
-        int maxParticipants)
+    // Shared segmentation primitive used both for grouping top-level RootCalls into phases
+    // (boundaryParticipants empty) and for splitting a single oversized call's NestedCalls into
+    // sub-parts (boundaryParticipants = that call's caller+callee, always present in every
+    // resulting segment). A segment boundary is drawn when the next call would push the segment
+    // over the participant or message cap, or when it looks like the start of an unrelated
+    // business flow (see ShouldCutBefore).
+    private static List<List<CallSequenceCallNode>> SegmentCalls(
+        IReadOnlyList<CallSequenceCallNode> calls,
+        HashSet<string> boundaryParticipants,
+        int maxParticipants,
+        int maxMessages,
+        bool stackedBars)
     {
-        var phases = new List<List<CallSequenceCallNode>>();
-        var currentPhase = new List<CallSequenceCallNode>();
-        var currentParticipants = new HashSet<string>(StringComparer.Ordinal);
+        var segments = new List<List<CallSequenceCallNode>>();
+        var current = new List<CallSequenceCallNode>();
+        var currentParticipants = new HashSet<string>(boundaryParticipants, StringComparer.Ordinal);
+        int currentMessages = 0;
 
-        foreach (var call in rootCalls)
+        foreach (var call in calls)
         {
             var callParticipants = GetSubtreeParticipants(call);
-            var combined = new HashSet<string>(currentParticipants, StringComparer.Ordinal);
-            combined.UnionWith(callParticipants);
+            int callMessages = CountArrowsInSubtree(call, stackedBars);
 
-            if (combined.Count > maxParticipants && currentPhase.Count > 0)
+            if (current.Count > 0 && ShouldCutBefore(
+                    currentParticipants, currentMessages, callParticipants, callMessages,
+                    boundaryParticipants, maxParticipants, maxMessages))
             {
-                phases.Add(new List<CallSequenceCallNode>(currentPhase));
-                currentPhase.Clear();
-                currentParticipants.Clear();
+                segments.Add(current);
+                current = new List<CallSequenceCallNode>();
+                currentParticipants = new HashSet<string>(boundaryParticipants, StringComparer.Ordinal);
+                currentMessages = 0;
             }
 
-            currentPhase.Add(call);
+            current.Add(call);
             currentParticipants.UnionWith(callParticipants);
+            currentMessages += callMessages;
         }
 
-        if (currentPhase.Count > 0)
-            phases.Add(currentPhase);
+        if (current.Count > 0)
+            segments.Add(current);
 
-        return phases;
+        return segments;
     }
 
-    private static List<(List<CallSequenceCallNode> Calls, HashSet<string> Participants)> SplitPhaseIntoSubParts(
-        List<CallSequenceCallNode> phaseCalls,
-        int maxParticipants)
+    private static bool ShouldCutBefore(
+        HashSet<string> segParticipants,
+        int segMessages,
+        HashSet<string> nextParticipants,
+        int nextMessages,
+        HashSet<string> boundaryParticipants,
+        int maxParticipants,
+        int maxMessages)
     {
-        // Multiple calls in phase: try greedy grouping
-        if (phaseCalls.Count > 1)
-        {
-            var result = new List<(List<CallSequenceCallNode>, HashSet<string>)>();
-            var current = new List<CallSequenceCallNode>();
-            var currentParts = new HashSet<string>(StringComparer.Ordinal);
+        var combined = new HashSet<string>(segParticipants, StringComparer.Ordinal);
+        combined.UnionWith(nextParticipants);
+        if (combined.Count > maxParticipants)
+            return true;
 
-            foreach (var call in phaseCalls)
-            {
-                var callParts = GetSubtreeParticipants(call);
-                var combined = new HashSet<string>(currentParts, StringComparer.Ordinal);
-                combined.UnionWith(callParts);
+        if (segMessages + nextMessages > maxMessages)
+            return true;
 
-                if (combined.Count > maxParticipants && current.Count > 0)
-                {
-                    result.Add((new List<CallSequenceCallNode>(current), new HashSet<string>(currentParts, StringComparer.Ordinal)));
-                    current.Clear();
-                    currentParts.Clear();
-                }
+        // Natural business-flow seam: the next call barely overlaps what's accumulated so far
+        // (excluding always-present boundary participants), and the segment already has enough
+        // substance to stand alone — a concrete, deterministic proxy for "unrelated flow
+        // starting," grounded in actual participant structure rather than names/comments.
+        int meaningfulSegSize = segParticipants.Count(p => !boundaryParticipants.Contains(p));
+        if (meaningfulSegSize < MinPhaseParticipantsForSplit)
+            return false;
 
-                current.Add(call);
-                currentParts.UnionWith(callParts);
-            }
-
-            if (current.Count > 0)
-                result.Add((current, currentParts));
-
-            if (result.Count > 1) return result;
-        }
-
-        // Single oversized call: promote its nested calls as virtual roots
-        var parentCall = phaseCalls[0];
-        if (parentCall.NestedCalls.Count == 0)
-            return [(phaseCalls, GetCallListParticipants(phaseCalls))];
-
-        var boundary = new HashSet<string>(StringComparer.Ordinal)
-        {
-            parentCall.CallerParticipantId,
-            parentCall.CalleeParticipantId,
-        };
-
-        var subResult = new List<(List<CallSequenceCallNode>, HashSet<string>)>();
-        var subCurrent = new List<CallSequenceCallNode>();
-        var subParts = new HashSet<string>(boundary, StringComparer.Ordinal);
-
-        foreach (var nested in parentCall.NestedCalls)
-        {
-            var nestedParts = GetSubtreeParticipants(nested);
-            var combined = new HashSet<string>(subParts, StringComparer.Ordinal);
-            combined.UnionWith(nestedParts);
-
-            if (combined.Count > maxParticipants && subCurrent.Count > 0)
-            {
-                var segParts = new HashSet<string>(subParts, StringComparer.Ordinal);
-                subResult.Add((new List<CallSequenceCallNode>(subCurrent), segParts));
-                subCurrent.Clear();
-                subParts = new HashSet<string>(boundary, StringComparer.Ordinal);
-            }
-
-            subCurrent.Add(nested);
-            subParts.UnionWith(nestedParts);
-        }
-
-        if (subCurrent.Count > 0)
-            subResult.Add((subCurrent, subParts));
-
-        // Ensure boundary participants appear in every sub-segment
-        foreach (var (_, parts) in subResult)
-            parts.UnionWith(boundary);
-
-        if (subResult.Count <= 1)
-            return [(phaseCalls, GetCallListParticipants(phaseCalls))];
-
-        return subResult;
+        int shared = nextParticipants.Count(p => segParticipants.Contains(p));
+        double overlapRatio = nextParticipants.Count == 0 ? 1.0 : (double)shared / nextParticipants.Count;
+        return overlapRatio <= LowOverlapThreshold;
     }
 
     // ── Participant helpers ───────────────────────────────────────────────────
@@ -443,7 +531,7 @@ public sealed class MermaidSequenceSerializer
 
     // ── Arrow counting ────────────────────────────────────────────────────────
 
-    private static int CountArrows(List<CallSequenceCallNode> calls, bool stackedBars)
+    private static int CountArrows(IReadOnlyList<CallSequenceCallNode> calls, bool stackedBars)
     {
         int count = 0;
         foreach (var call in calls)
@@ -500,6 +588,16 @@ public sealed class MermaidSequenceSerializer
                 sb.AppendLine("    autonumber");
         }
 
+        // Item 2: the «Caller» actor spans every segment of a split diagram, staying "in flight"
+        // the same way SplitBoundary already keeps a split parent's caller/callee active across
+        // sub-parts — only the first segment shows the opening call into the root method, and
+        // only the last shows the return out of it.
+        bool hasCaller = !string.IsNullOrEmpty(sequence.RootParticipantId);
+        var callerId = hasCaller ? GetCallerActorId(sequence.Participants) : string.Empty;
+
+        if (hasCaller)
+            sb.Append("    actor ").Append(callerId).Append(" as ").AppendLine(CallerActorLabel);
+
         var segSet = new HashSet<string>(plan.ParticipantIds, StringComparer.Ordinal);
         foreach (var p in sequence.Participants)
         {
@@ -516,8 +614,29 @@ public sealed class MermaidSequenceSerializer
                 sb.Append("    activate ").AppendLine(p);
         }
 
+        if (hasCaller && stackedBars)
+        {
+            if (plan.IsFirstSegment)
+                sb.Append("    ").Append(callerId).Append("->>+").Append(sequence.RootParticipantId).Append(": ").AppendLine(EscapeLabel(sequence.RootMethodLabel));
+            else
+                sb.Append("    activate ").AppendLine(callerId);
+        }
+        else if (hasCaller && plan.IsFirstSegment)
+        {
+            // Stacked bars off: no activation concept, just the plain opening arrow on segment 1.
+            sb.Append("    ").Append(callerId).Append("->>").Append(sequence.RootParticipantId).Append(": ").AppendLine(EscapeLabel(sequence.RootMethodLabel));
+        }
+
         foreach (var call in plan.VirtualRootCalls)
             EmitCall(sb, call, stackedBars);
+
+        if (hasCaller && stackedBars)
+        {
+            if (plan.IsLastSegment)
+                sb.Append("    ").Append(sequence.RootParticipantId).Append("-->>-").Append(callerId).AppendLine(": ");
+            else
+                sb.Append("    deactivate ").AppendLine(callerId);
+        }
 
         if (stackedBars && plan.SplitBoundary.Count > 0)
         {

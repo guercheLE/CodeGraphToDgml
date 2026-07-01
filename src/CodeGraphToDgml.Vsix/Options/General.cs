@@ -134,6 +134,12 @@ internal class General : BaseOptionModel<General>
     [DefaultValue(15)]
     public int SequenceDiagramMaxParticipantsPerDiagram { get; set; } = 15;
 
+    [Category("Sequence Diagram")]
+    [DisplayName("Max messages per diagram")]
+    [Description("When greater than zero, sections are also split so each contains at most this many message arrows, independent of the participant cap. Set to 0 to disable message-based splitting.")]
+    [DefaultValue(100)]
+    public int SequenceDiagramMaxMessagesPerDiagram { get; set; } = 100;
+
     [Category("UI")]
     [DisplayName("Activate result document")]
     [Description("When enabled, the DGML document is brought to the front after it is updated.")]
