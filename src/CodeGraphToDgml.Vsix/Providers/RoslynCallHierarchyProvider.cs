@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using Microsoft.CodeAnalysis.Host.Mef;
 using CodeGraphToDgml.Core;
+using CodeGraphToDgml.Roslyn;
 using EnvDTE;
 using EnvDTE80;
 using Microsoft.CodeAnalysis;
@@ -80,11 +81,11 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
         await _logger.WriteLineAsync($"[ResolveSubject] Raw resolved symbol: {symbol?.ToDisplayString() ?? "(null)"}, Kind={symbol?.Kind}").ConfigureAwait(false);
 
-        symbol = NormalizeSymbol(symbol);
+        symbol = CallGraphSyntaxWalker.NormalizeSymbol(symbol);
 
         await _logger.WriteLineAsync($"[ResolveSubject] Normalized symbol: {symbol?.ToDisplayString() ?? "(null)"}, Kind={symbol?.Kind}").ConfigureAwait(false);
 
-        if (symbol is null || !IsSupportedRootSymbol(symbol))
+        if (symbol is null || !CallGraphFilters.IsSupportedRootSymbol(symbol))
         {
             await _logger.WriteLineAsync($"[ResolveSubject] Symbol rejected: not a supported root symbol.").ConfigureAwait(false);
             return null;
@@ -151,14 +152,14 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 // enclosing real method/property/event so the graph never contains
                 // anonymous/empty-named nodes. Inner calls of the lambda are linked
                 // directly from the enclosing member.
-                var caller = NormalizeSymbol(UnwrapLambdaContainer(callerInfo.CallingSymbol));
-                if (caller is null || !IsAllowed(caller, normalizedOptions))
+                var caller = CallGraphSyntaxWalker.NormalizeSymbol(CallGraphSyntaxWalker.UnwrapLambdaContainer(callerInfo.CallingSymbol));
+                if (caller is null || !CallGraphFilters.IsAllowed(caller, normalizedOptions))
                 {
                     continue;
                 }
 
-                var currentCallee = NormalizeSymbol(current);
-                var calledSymbol = NormalizeSymbol(callerInfo.CalledSymbol);
+                var currentCallee = CallGraphSyntaxWalker.NormalizeSymbol(current);
+                var calledSymbol = CallGraphSyntaxWalker.NormalizeSymbol(callerInfo.CalledSymbol);
 
                 var callerProject = caller.ContainingAssembly?.Name;
                 AddNodeAndContainers(graph, caller, callerProject, roslynSubject.Solution);
@@ -225,7 +226,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
         void Enqueue(ISymbol symbol, int depth)
         {
-            var normalized = NormalizeSymbol(symbol);
+            var normalized = CallGraphSyntaxWalker.NormalizeSymbol(symbol);
             if (normalized is null)
             {
                 return;
@@ -282,17 +283,19 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 continue;
             }
 
-            var currentNormalized = NormalizeSymbol(current)!;
+            var currentNormalized = CallGraphSyntaxWalker.NormalizeSymbol(current)!;
             var currentProject = currentNormalized.ContainingAssembly?.Name;
 
-            var callees = await FindCalleesAsync(current, roslynSubject.Solution, cancellationToken).ConfigureAwait(false);
+            // DGML is a static call graph: it only cares about which symbol was called, never
+            // about fluent-chain metadata (that's sequence-diagram-only rendering, see item 1g).
+            var callees = await CallGraphSyntaxWalker.FindCalleesAsync(current, roslynSubject.Solution, cancellationToken).ConfigureAwait(false);
 
-            foreach (var callee in callees)
+            foreach (var calleeInfo in callees)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var normalized = NormalizeSymbol(callee);
-                if (normalized is null || !IsAllowed(normalized, normalizedOptions))
+                var normalized = CallGraphSyntaxWalker.NormalizeSymbol(calleeInfo.Symbol);
+                if (normalized is null || !CallGraphFilters.IsAllowed(normalized, normalizedOptions))
                 {
                     continue;
                 }
@@ -332,7 +335,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
         void Enqueue(ISymbol symbol, int depth)
         {
-            var normalized = NormalizeSymbol(symbol);
+            var normalized = CallGraphSyntaxWalker.NormalizeSymbol(symbol);
             if (normalized is null)
             {
                 return;
@@ -371,8 +374,8 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
         foreach (var impl in implementations)
         {
-            var normImpl = NormalizeSymbol(impl);
-            if (normImpl is null || !IsAllowed(normImpl, options))
+            var normImpl = CallGraphSyntaxWalker.NormalizeSymbol(impl);
+            if (normImpl is null || !CallGraphFilters.IsAllowed(normImpl, options))
             {
                 continue;
             }
@@ -410,8 +413,8 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         var baseSymbol = GetOverriddenSymbol(overridingMember);
         if (baseSymbol is null) return false;
 
-        var normBase = NormalizeSymbol(baseSymbol);
-        if (normBase is null || !IsAllowed(normBase, options)) return false;
+        var normBase = CallGraphSyntaxWalker.NormalizeSymbol(baseSymbol);
+        if (normBase is null || !CallGraphFilters.IsAllowed(normBase, options)) return false;
 
         var baseProject = normBase.ContainingAssembly?.Name;
         AddNodeAndContainers(graph, normBase, baseProject, solution);
@@ -435,139 +438,9 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         return null;
     }
 
-    private static async Task<IReadOnlyList<ISymbol>> FindCalleesAsync(
-        ISymbol symbol,
-        RoslynSolution solution,
-        CancellationToken cancellationToken)
-    {
-        var callees = new List<ISymbol>();
-        var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
-
-        foreach (var syntaxRef in symbol.DeclaringSyntaxReferences)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            var syntaxNode = await syntaxRef.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
-            var document = solution.GetDocument(syntaxRef.SyntaxTree);
-            if (document is null)
-            {
-                continue;
-            }
-
-            var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
-            if (semanticModel is null)
-            {
-                continue;
-            }
-
-            foreach (var invocation in GetInvocationsPostOrder(syntaxNode))
-            {
-                var symbolInfo = semanticModel.GetSymbolInfo(invocation, cancellationToken);
-                var resolved = symbolInfo.Symbol ?? (symbolInfo.CandidateSymbols.Length == 1 ? symbolInfo.CandidateSymbols[0] : null);
-
-                if (resolved is null)
-                {
-                    continue;
-                }
-
-                var normalized = NormalizeSymbol(resolved);
-                if (normalized is null || !IsSupportedCalleeSymbol(normalized))
-                {
-                    continue;
-                }
-
-                // Skip self-references.
-                if (SymbolEqualityComparer.Default.Equals(normalized, NormalizeSymbol(symbol)))
-                {
-                    continue;
-                }
-
-                bool isNewInvocation = seen.Add(normalized);
-                if (isNewInvocation)
-                    callees.Add(normalized);
-
-                // Collect chained member accesses (e.g., obj.Property.Method()).
-                // Walk from the invocation's receiver inward; the walk yields accesses
-                // in innermost-first order, so we reverse to get execution order and
-                // insert them before the main invocation so the diagram shows them first.
-                var chainedBefore = new List<ISymbol>();
-                var expr = invocation.Expression;
-                while (expr is Microsoft.CodeAnalysis.CSharp.Syntax.MemberAccessExpressionSyntax memberAccess)
-                {
-                    var memberSymbolInfo = semanticModel.GetSymbolInfo(memberAccess, cancellationToken);
-                    var memberResolved = memberSymbolInfo.Symbol ?? (memberSymbolInfo.CandidateSymbols.Length == 1 ? memberSymbolInfo.CandidateSymbols[0] : null);
-                    var memberNormalized = NormalizeSymbol(memberResolved);
-                    if (memberNormalized != null && IsSupportedCalleeSymbol(memberNormalized))
-                    {
-                        if (!SymbolEqualityComparer.Default.Equals(memberNormalized, NormalizeSymbol(symbol)) && seen.Add(memberNormalized))
-                        {
-                            chainedBefore.Add(memberNormalized);
-                        }
-                    }
-                    expr = memberAccess.Expression;
-                }
-
-                if (chainedBefore.Count > 0)
-                {
-                    chainedBefore.Reverse();
-                    if (isNewInvocation)
-                        callees.InsertRange(callees.Count - 1, chainedBefore);
-                    else
-                        callees.AddRange(chainedBefore);
-                }
-            }
-        }
-
-        return callees;
-    }
-
-    /// <summary>
-    /// Yields every <see cref="InvocationExpressionSyntax"/> reachable from <paramref name="root"/>
-    /// in post-order (children before parent). This matches C# argument-evaluation order: an
-    /// invocation used as an argument is yielded before the outer invocation that receives it.
-    /// </summary>
-    private static IEnumerable<Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax> GetInvocationsPostOrder(SyntaxNode root)
-    {
-        foreach (var child in root.ChildNodes())
-            foreach (var inv in GetInvocationsPostOrder(child))
-                yield return inv;
-
-        if (root is Microsoft.CodeAnalysis.CSharp.Syntax.InvocationExpressionSyntax invocation)
-            yield return invocation;
-    }
-
-    private static bool IsSupportedCalleeSymbol(ISymbol symbol)
-    {
-        // Exclude lambdas, anonymous methods, and local functions. They have empty Name
-        // and a synthesised containing type, which would render as empty-named nodes in
-        // the graph. Their inner invocations are still discovered because the syntax
-        // walker descends through the lambda/local-function body.
-        if (symbol is IMethodSymbol method
-            && (method.MethodKind == MethodKind.AnonymousFunction
-                || method.MethodKind == MethodKind.LocalFunction))
-        {
-            return false;
-        }
-
-        return symbol.Kind is SymbolKind.Method or SymbolKind.Property or SymbolKind.Event;
-    }
-
-    /// <summary>
-    /// If <paramref name="symbol"/> is a lambda, anonymous method, or local function,
-    /// walks up the containing-symbol chain until a real (non-lambda) symbol is found.
-    /// Used when an upward-traversal caller comes back as a lambda's anonymous method.
-    /// </summary>
-    private static ISymbol? UnwrapLambdaContainer(ISymbol? symbol)
-    {
-        while (symbol is IMethodSymbol method
-            && (method.MethodKind == MethodKind.AnonymousFunction
-                || method.MethodKind == MethodKind.LocalFunction))
-        {
-            symbol = symbol.ContainingSymbol;
-        }
-
-        return symbol;
-    }
+    // FindCalleesAsync, GetInvocationsPostOrder, IsSupportedCalleeSymbol, and UnwrapLambdaContainer
+    // now live in CodeGraphToDgml.Roslyn.CallGraphSyntaxWalker, which has no VS SDK dependency and
+    // is exercised directly by Roslyn-backed unit tests.
 
     private static void AddNodeAndContainers(TraversalGraph graph, ISymbol symbol, string? projectName, RoslynSolution? solution = null)
     {
@@ -690,8 +563,8 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             var declaredSymbol = semanticModel.GetDeclaredSymbol(node, cancellationToken);
             if (declaredSymbol is not null)
             {
-                var normalized = NormalizeSymbol(declaredSymbol);
-                if (normalized is not null && IsSupportedRootSymbol(normalized))
+                var normalized = CallGraphSyntaxWalker.NormalizeSymbol(declaredSymbol);
+                if (normalized is not null && CallGraphFilters.IsSupportedRootSymbol(normalized))
                 {
                     return declaredSymbol;
                 }
@@ -759,70 +632,9 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         }
     }
 
-    private static ISymbol? NormalizeSymbol(ISymbol? symbol)
-    {
-        if (symbol is IMethodSymbol method && method.AssociatedSymbol is not null)
-        {
-            symbol = method.AssociatedSymbol;
-        }
-
-        return symbol?.OriginalDefinition;
-    }
-
-    private static bool IsSupportedRootSymbol(ISymbol symbol)
-    {
-        return symbol.Kind is SymbolKind.Method or SymbolKind.Property or SymbolKind.Event;
-    }
-
-    private static bool IsAllowed(ISymbol symbol, TraversalOptions options)
-    {
-        if (!IsIncludedByKind(symbol, options))
-        {
-            return false;
-        }
-
-        var sourceLocation = symbol.Locations.FirstOrDefault(location => location.IsInSource);
-        if (!options.IncludeExternalSymbols && sourceLocation is null)
-        {
-            return false;
-        }
-
-        if (!options.IncludeGeneratedCode && IsGenerated(sourceLocation?.SourceTree?.FilePath))
-        {
-            return false;
-        }
-
-        return true;
-    }
-
-    private static bool IsIncludedByKind(ISymbol symbol, TraversalOptions options)
-    {
-        return symbol.Kind switch
-        {
-            SymbolKind.Method => true,
-            SymbolKind.Property => options.IncludeProperties,
-            SymbolKind.Event => options.IncludeEvents,
-            _ => false,
-        };
-    }
-
-    private static bool IsGenerated(string? filePath)
-    {
-        if (string.IsNullOrWhiteSpace(filePath))
-        {
-            return false;
-        }
-
-        var normalizedFilePath = filePath!;
-        var fileName = Path.GetFileName(normalizedFilePath) ?? string.Empty;
-        return fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
-            || fileName.EndsWith(".g.vb", StringComparison.OrdinalIgnoreCase)
-            || fileName.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase)
-            || fileName.EndsWith(".designer.vb", StringComparison.OrdinalIgnoreCase)
-            || fileName.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase)
-            || fileName.EndsWith(".generated.vb", StringComparison.OrdinalIgnoreCase)
-            || normalizedFilePath.IndexOf("\\obj\\", StringComparison.OrdinalIgnoreCase) >= 0;
-    }
+    // NormalizeSymbol now lives in CallGraphSyntaxWalker; IsSupportedRootSymbol, IsAllowed,
+    // IsIncludedByKind, and IsGenerated now live in CodeGraphToDgml.Roslyn.CallGraphFilters
+    // (which also carries the item-4 well-known-framework-method whitelist carve-out).
 
     private static GraphNode CreateNode(ISymbol symbol, string? projectName = null)
     {
@@ -1069,8 +881,8 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         var visited = new HashSet<string>(StringComparer.Ordinal);
         var nodeCount = 0;
 
-        var rootSymbol = NormalizeSymbol(roslynSubject.Symbol)!;
-        var rootParticipantId = GetParticipantId(rootSymbol, participantTable);
+        var rootSymbol = CallGraphSyntaxWalker.NormalizeSymbol(roslynSubject.Symbol)!;
+        var rootParticipantId = GetParticipantId(rootSymbol, participantTable, callerParticipantId: null);
 
         var rootCalls = await BuildCallsAsync(rootSymbol, rootParticipantId, 0).ConfigureAwait(false);
 
@@ -1079,6 +891,8 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             Title = subject.DisplayName,
             Participants = participantTable.Participants,
             RootCalls = rootCalls,
+            RootParticipantId = rootParticipantId,
+            RootMethodLabel = GetNodeLabel(rootSymbol),
         };
 
         async Task<IReadOnlyList<CallSequenceCallNode>> BuildCallsAsync(
@@ -1091,22 +905,35 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
             progress?.Report(new TraversalProgress("Traversing callees", depth, nodeCount, caller.ToDisplayString()));
 
-            var callees = await FindCalleesAsync(caller, roslynSubject.Solution, cancellationToken).ConfigureAwait(false);
-            var nodes = new List<CallSequenceCallNode>();
+            var callees = await CallGraphSyntaxWalker.FindCalleesAsync(caller, roslynSubject.Solution, cancellationToken).ConfigureAwait(false);
 
-            foreach (var callee in callees)
+            // Item 1g: fluent invocation chains (e.g. obj.GetClient().GetProduct()) are nested
+            // under their receiver's activation in the sequence diagram, instead of being shown
+            // as siblings both called directly by `caller`. This is a rendering-only distinction —
+            // the DGML graph (TraverseDownAsync above) never sees CalleeInfo.FluentReceiver.
+            //
+            // Pass 1: build each callee's own node content (participant, label, its own nested
+            // calls) without yet deciding whether it will be a top-level sibling or grafted under
+            // a fluent receiver.
+            var order = new List<ISymbol>();
+            var ownNestedOf = new Dictionary<ISymbol, IReadOnlyList<CallSequenceCallNode>>(SymbolEqualityComparer.Default);
+            var participantOf = new Dictionary<ISymbol, string>(SymbolEqualityComparer.Default);
+            var labelOf = new Dictionary<ISymbol, string>(SymbolEqualityComparer.Default);
+            var fluentReceiverOf = new Dictionary<ISymbol, ISymbol>(SymbolEqualityComparer.Default);
+
+            foreach (var calleeInfo in callees)
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var normalized = NormalizeSymbol(callee);
-                if (normalized is null || !IsAllowed(normalized, normalizedOptions))
+                var normalized = CallGraphSyntaxWalker.NormalizeSymbol(calleeInfo.Symbol);
+                if (normalized is null || !CallGraphFilters.IsAllowed(normalized, normalizedOptions))
                     continue;
 
                 nodeCount++;
                 if (nodeCount >= normalizedOptions.MaxNodeCount)
                     break;
 
-                var calleeParticipantId = GetParticipantId(normalized, participantTable);
+                var calleeParticipantId = GetParticipantId(normalized, participantTable, callerParticipantId);
                 var calleeId = GetStableId(normalized);
 
                 IReadOnlyList<CallSequenceCallNode> nested;
@@ -1124,11 +951,54 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                     nested = [];
                 }
 
-                nodes.Add(new CallSequenceCallNode(
-                    callerParticipantId,
-                    calleeParticipantId,
-                    GetNodeLabel(normalized),
-                    nested));
+                order.Add(normalized);
+                ownNestedOf[normalized] = nested;
+                participantOf[normalized] = calleeParticipantId;
+                labelOf[normalized] = GetNodeLabel(normalized);
+
+                if (calleeInfo.FluentReceiver is { } receiver)
+                {
+                    var normReceiver = CallGraphSyntaxWalker.NormalizeSymbol(receiver);
+                    if (normReceiver != null)
+                        fluentReceiverOf[normalized] = normReceiver;
+                }
+            }
+
+            // Pass 2: assemble nodes, grafting fluent-dependents into their receiver's
+            // NestedCalls (with the receiver's own participant as the dependent's caller)
+            // instead of returning them as top-level siblings of `caller`.
+            var finalized = new Dictionary<ISymbol, CallSequenceCallNode>(SymbolEqualityComparer.Default);
+
+            CallSequenceCallNode Finalize(ISymbol symbol, string effectiveCallerParticipantId)
+            {
+                if (finalized.TryGetValue(symbol, out var existing))
+                    return existing;
+
+                var participantId = participantOf[symbol];
+                var ownNested = new List<CallSequenceCallNode>(ownNestedOf[symbol]);
+                foreach (var dependent in order)
+                {
+                    if (fluentReceiverOf.TryGetValue(dependent, out var receiver)
+                        && SymbolEqualityComparer.Default.Equals(receiver, symbol))
+                    {
+                        ownNested.Add(Finalize(dependent, participantId));
+                    }
+                }
+
+                var node = new CallSequenceCallNode(effectiveCallerParticipantId, participantId, labelOf[symbol], ownNested);
+                finalized[symbol] = node;
+                return node;
+            }
+
+            var nodes = new List<CallSequenceCallNode>();
+            foreach (var symbol in order)
+            {
+                // Skip symbols that will be grafted under their fluent receiver's NestedCalls
+                // (only when that receiver was itself kept in this batch).
+                if (fluentReceiverOf.TryGetValue(symbol, out var receiver) && ownNestedOf.ContainsKey(receiver))
+                    continue;
+
+                nodes.Add(Finalize(symbol, callerParticipantId));
             }
 
             return nodes;
@@ -1145,15 +1015,15 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             var dispatchNodes = new List<CallSequenceCallNode>();
             foreach (var impl in implementations)
             {
-                var normImpl = NormalizeSymbol(impl);
-                if (normImpl is null || !IsAllowed(normImpl, normalizedOptions))
+                var normImpl = CallGraphSyntaxWalker.NormalizeSymbol(impl);
+                if (normImpl is null || !CallGraphFilters.IsAllowed(normImpl, normalizedOptions))
                     continue;
 
                 nodeCount++;
                 if (nodeCount >= normalizedOptions.MaxNodeCount)
                     break;
 
-                var implParticipantId = GetParticipantId(normImpl, participantTable);
+                var implParticipantId = GetParticipantId(normImpl, participantTable, interfaceParticipantId);
                 var implId = GetStableId(normImpl);
 
                 IReadOnlyList<CallSequenceCallNode> implBody;
@@ -1169,8 +1039,18 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         }
     }
 
-    private static string GetParticipantId(ISymbol symbol, ParticipantTable table)
+    private static string GetParticipantId(ISymbol symbol, ParticipantTable table, string? callerParticipantId)
     {
+        // Item 4: well-known framework "outcome" methods (e.g. ControllerBase.Ok/BadRequest) are
+        // rendered as a self-call on the caller's own lifeline rather than a separate participant
+        // for their (external) declaring type — one noisy "ControllerBase" swimlane per whitelisted
+        // call would be both cluttered and semantically wrong, since the caller itself produces
+        // the response, not a distinct collaborator.
+        if (callerParticipantId is not null && symbol is IMethodSymbol method && WellKnownFrameworkMethods.IsWellKnownOutcomeMethod(method))
+        {
+            return callerParticipantId;
+        }
+
         var containingType = symbol.ContainingType;
         if (containingType is not null)
             return table.GetOrAdd(containingType);
