@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/CodeGraphToDgml.Core/CodeGraphToDgml.Core.csproj" />
+    <Project Path="src/CodeGraphToDgml.Roslyn/CodeGraphToDgml.Roslyn.csproj" />
     <Project Path="src/CodeGraphToDgml.Vsix/CodeGraphToDgml.Vsix.csproj" />
   </Folder>
   <Folder Name="/tests/">

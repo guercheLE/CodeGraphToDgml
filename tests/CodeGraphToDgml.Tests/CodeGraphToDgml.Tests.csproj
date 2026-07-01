@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="MSTest" Version="4.0.2" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.3.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -17,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CodeGraphToDgml.Core\CodeGraphToDgml.Core.csproj" />
+    <ProjectReference Include="..\..\src\CodeGraphToDgml.Roslyn\CodeGraphToDgml.Roslyn.csproj" />
   </ItemGroup>
 
 </Project>

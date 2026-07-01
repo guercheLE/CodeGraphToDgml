@@ -27,6 +27,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeGraphToDgml.Core\CodeGraphToDgml.Core.csproj" />
+    <ProjectReference Include="..\CodeGraphToDgml.Roslyn\CodeGraphToDgml.Roslyn.csproj" />
   </ItemGroup>
 
   <ItemGroup>
