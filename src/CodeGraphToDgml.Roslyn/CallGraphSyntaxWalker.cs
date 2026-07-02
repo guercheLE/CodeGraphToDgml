@@ -43,16 +43,55 @@ public static class CallGraphSyntaxWalker
 {
     /// <summary>
     /// If <paramref name="symbol"/> is an accessor (property getter/setter, event add/remove),
-    /// returns its associated property/event instead. Always returns the original definition.
+    /// returns its associated property/event instead; if it is a reduced extension method
+    /// (instance-style call), returns the unreduced static form so both call styles compare
+    /// equal. Always returns the original definition.
     /// </summary>
     public static ISymbol? NormalizeSymbol(ISymbol? symbol)
     {
-        if (symbol is IMethodSymbol method && method.AssociatedSymbol is not null)
+        if (symbol is IMethodSymbol method)
         {
-            symbol = method.AssociatedSymbol;
+            if (method.ReducedFrom is not null)
+            {
+                symbol = method.ReducedFrom;
+            }
+            else if (method.AssociatedSymbol is not null)
+            {
+                symbol = method.AssociatedSymbol;
+            }
         }
 
         return symbol?.OriginalDefinition;
+    }
+
+    /// <summary>
+    /// Peels explicit delegate creation (<c>new EventHandler(M)</c>), casts (<c>(Action)M</c>),
+    /// and parentheses down to the underlying method-group expression (an identifier or member
+    /// access). Returns null when the expression isn't, or doesn't wrap, a bare method group /
+    /// simple member reference. Callers remain responsible for validating that the surrounding
+    /// slot (parameter, variable, event) is delegate-typed.
+    /// </summary>
+    private static ExpressionSyntax? UnwrapMethodGroupExpression(ExpressionSyntax? expr)
+    {
+        while (true)
+        {
+            switch (expr)
+            {
+                case ParenthesizedExpressionSyntax paren:
+                    expr = paren.Expression;
+                    continue;
+                case CastExpressionSyntax cast:
+                    expr = cast.Expression;
+                    continue;
+                case BaseObjectCreationExpressionSyntax creation when creation.ArgumentList?.Arguments.Count == 1:
+                    expr = creation.ArgumentList.Arguments[0].Expression;
+                    continue;
+                case IdentifierNameSyntax or MemberAccessExpressionSyntax:
+                    return expr;
+                default:
+                    return null;
+            }
+        }
     }
 
     /// <summary>
@@ -91,9 +130,12 @@ public static class CallGraphSyntaxWalker
 
     /// <summary>
     /// Discovers every callee reachable from <paramref name="symbol"/>'s declaring syntax:
-    /// direct invocations, chained member-access invocations, method groups passed to
-    /// delegate-typed parameters, event subscriptions (<c>+=</c>/<c>-=</c>), and delegate
-    /// variables/fields invoked indirectly within the same method body.
+    /// direct invocations, chained member-access invocations, constructor calls (including
+    /// <c>: this/base(...)</c> chaining), property writes and indexer accesses, collection
+    /// initializer <c>Add</c> calls, event raises, method groups passed to delegate-typed
+    /// parameters (bare, delegate-creation-wrapped, or cast-wrapped), event subscriptions
+    /// (<c>+=</c>/<c>-=</c>), and delegate variables/fields invoked (or passed onward)
+    /// within the same method body.
     /// </summary>
     public static async Task<IReadOnlyList<CalleeInfo>> FindCalleesAsync(
         ISymbol symbol,
@@ -103,6 +145,18 @@ public static class CallGraphSyntaxWalker
         var callees = new List<CalleeInfo>();
         var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
         var selfNormalized = NormalizeSymbol(symbol);
+
+        // Shared add path for call sites without fluent-chain metadata (constructors,
+        // property writes, indexers, collection-initializer Adds, ctor chaining).
+        void AddSimpleCallee(ISymbol? normalized)
+        {
+            if (normalized is null || !IsSupportedCalleeSymbol(normalized))
+                return;
+            if (SymbolEqualityComparer.Default.Equals(normalized, selfNormalized))
+                return;
+            if (seen.Add(normalized))
+                callees.Add(new CalleeInfo(normalized));
+        }
 
         foreach (var syntaxRef in symbol.DeclaringSyntaxReferences)
         {
@@ -130,96 +184,174 @@ public static class CallGraphSyntaxWalker
             // receiver is itself a previously-visited invocation.
             var invocationSymbolOf = new Dictionary<InvocationExpressionSyntax, ISymbol>();
 
-            foreach (var invocation in GetInvocationsPostOrder(syntaxNode))
+            foreach (var site in GetCallSitesPostOrder(syntaxNode))
             {
-                var symbolInfo = semanticModel.GetSymbolInfo(invocation, cancellationToken);
-                var resolved = symbolInfo.Symbol ?? (symbolInfo.CandidateSymbols.Length == 1 ? symbolInfo.CandidateSymbols[0] : null);
+                cancellationToken.ThrowIfCancellationRequested();
 
-                // 1c: redirect calls through a tracked local/field delegate variable to the
-                // originally-assigned method-group target instead of the delegate's Invoke().
-                if (resolved is IMethodSymbol { MethodKind: MethodKind.DelegateInvoke })
+                switch (site)
                 {
-                    var targetSymbolInfo = semanticModel.GetSymbolInfo(invocation.Expression, cancellationToken);
-                    var targetSymbol = targetSymbolInfo.Symbol ?? targetSymbolInfo.CandidateSymbols.FirstOrDefault();
-                    var targetNormalized = NormalizeSymbol(targetSymbol);
-                    if (targetNormalized != null && localDelegateMap.TryGetValue(targetNormalized, out var redirected))
+                    case InvocationExpressionSyntax invocation:
                     {
-                        resolved = redirected;
-                    }
-                }
+                        var symbolInfo = semanticModel.GetSymbolInfo(invocation, cancellationToken);
+                        var resolved = symbolInfo.Symbol ?? (symbolInfo.CandidateSymbols.Length == 1 ? symbolInfo.CandidateSymbols[0] : null);
 
-                if (resolved is null)
-                {
-                    continue;
-                }
+                        // Parameter matching for method-group arguments uses the method as bound
+                        // at the call site, before any delegate redirect below rewrites `resolved`.
+                        var invokedForArgs = resolved as IMethodSymbol;
 
-                var normalized = NormalizeSymbol(resolved);
-                if (normalized is null || !IsSupportedCalleeSymbol(normalized))
-                {
-                    continue;
-                }
+                        // 1c/4/5: a call through a delegate value — `del(...)`, `del.Invoke(...)`,
+                        // `del.BeginInvoke(...)`, `MyEvent(...)`, `MyEvent?.Invoke(...)` — maps an
+                        // event raise to the event symbol itself, and redirects a tracked
+                        // local/field delegate variable to its originally-assigned method group.
+                        var delegateTarget = TryResolveDelegateCallTarget(invocation, resolved, semanticModel, localDelegateMap, cancellationToken);
+                        bool isDelegateRedirect = delegateTarget is not null;
+                        resolved = delegateTarget ?? resolved;
 
-                // Skip self-references.
-                if (SymbolEqualityComparer.Default.Equals(normalized, selfNormalized))
-                {
-                    continue;
-                }
+                        if (resolved is null)
+                            break;
 
-                bool isNewInvocation = seen.Add(normalized);
+                        var normalized = NormalizeSymbol(resolved);
+                        if (normalized is null || !IsSupportedCalleeSymbol(normalized))
+                            break;
 
-                // 1g: this invocation is a fluent chain step if its receiver is itself a
-                // directly-nested invocation already visited (post-order guarantees the receiver
-                // was processed first). Metadata only — never affects the flat callee list itself.
-                ISymbol? fluentReceiver = null;
-                if (invocation.Expression is MemberAccessExpressionSyntax outerMember
-                    && outerMember.Expression is InvocationExpressionSyntax receiverInvocation
-                    && invocationSymbolOf.TryGetValue(receiverInvocation, out var receiverSymbol))
-                {
-                    fluentReceiver = receiverSymbol;
-                }
+                        // Skip self-references.
+                        if (SymbolEqualityComparer.Default.Equals(normalized, selfNormalized))
+                            break;
 
-                invocationSymbolOf[invocation] = normalized;
+                        bool isNewInvocation = seen.Add(normalized);
 
-                if (isNewInvocation)
-                {
-                    callees.Add(new CalleeInfo(normalized, fluentReceiver));
-                }
-
-                // Collect chained member accesses (e.g., obj.Property.Method()).
-                // Walk from the invocation's receiver inward; the walk yields accesses
-                // in innermost-first order, so we reverse to get execution order and
-                // insert them before the main invocation so the diagram shows them first.
-                var chainedBefore = new List<ISymbol>();
-                var expr = invocation.Expression;
-                while (expr is MemberAccessExpressionSyntax memberAccess)
-                {
-                    var memberSymbolInfo = semanticModel.GetSymbolInfo(memberAccess, cancellationToken);
-                    var memberResolved = memberSymbolInfo.Symbol ?? (memberSymbolInfo.CandidateSymbols.Length == 1 ? memberSymbolInfo.CandidateSymbols[0] : null);
-                    var memberNormalized = NormalizeSymbol(memberResolved);
-                    if (memberNormalized != null && IsSupportedCalleeSymbol(memberNormalized))
-                    {
-                        if (!SymbolEqualityComparer.Default.Equals(memberNormalized, selfNormalized) && seen.Add(memberNormalized))
+                        // 1g: this invocation is a fluent chain step if its receiver is itself a
+                        // directly-nested invocation already visited (post-order guarantees the receiver
+                        // was processed first). Metadata only — never affects the flat callee list itself.
+                        ISymbol? fluentReceiver = null;
+                        if (invocation.Expression is MemberAccessExpressionSyntax outerMember
+                            && outerMember.Expression is InvocationExpressionSyntax receiverInvocation
+                            && invocationSymbolOf.TryGetValue(receiverInvocation, out var receiverSymbol))
                         {
-                            chainedBefore.Add(memberNormalized);
+                            fluentReceiver = receiverSymbol;
                         }
+
+                        invocationSymbolOf[invocation] = normalized;
+
+                        if (isNewInvocation)
+                        {
+                            callees.Add(new CalleeInfo(normalized, fluentReceiver));
+                        }
+
+                        // Collect chained member accesses (e.g., obj.Property.Method()).
+                        // Walk from the invocation's receiver inward; the walk yields accesses
+                        // in innermost-first order, so we reverse to get execution order and
+                        // insert them before the main invocation so the diagram shows them first.
+                        // When the call was resolved as a delegate call, its own member access
+                        // (`a.BeginInvoke`, `del.Invoke`) is delegate machinery, not a chained
+                        // member — start the walk below it.
+                        var chainedBefore = new List<ISymbol>();
+                        var expr = isDelegateRedirect && invocation.Expression is MemberAccessExpressionSyntax delegateMember
+                            ? delegateMember.Expression
+                            : invocation.Expression;
+                        while (expr is MemberAccessExpressionSyntax memberAccess)
+                        {
+                            var memberSymbolInfo = semanticModel.GetSymbolInfo(memberAccess, cancellationToken);
+                            var memberResolved = memberSymbolInfo.Symbol ?? (memberSymbolInfo.CandidateSymbols.Length == 1 ? memberSymbolInfo.CandidateSymbols[0] : null);
+                            var memberNormalized = NormalizeSymbol(memberResolved);
+                            if (memberNormalized != null && IsSupportedCalleeSymbol(memberNormalized))
+                            {
+                                if (!SymbolEqualityComparer.Default.Equals(memberNormalized, selfNormalized) && seen.Add(memberNormalized))
+                                {
+                                    chainedBefore.Add(memberNormalized);
+                                }
+                            }
+                            expr = memberAccess.Expression;
+                        }
+
+                        if (chainedBefore.Count > 0)
+                        {
+                            chainedBefore.Reverse();
+                            var infos = chainedBefore.Select(s => new CalleeInfo(s)).ToList();
+                            if (isNewInvocation)
+                                callees.InsertRange(callees.Count - 1, infos);
+                            else
+                                callees.AddRange(infos);
+                        }
+
+                        // 1a: method groups (and tracked delegate variables) passed as arguments
+                        // to delegate-typed parameters.
+                        if (invokedForArgs is not null)
+                        {
+                            foreach (var argCallee in GetMethodGroupArgumentCallees(invokedForArgs, invocation.ArgumentList.Arguments, semanticModel, selfNormalized, seen, localDelegateMap, cancellationToken))
+                            {
+                                callees.Add(new CalleeInfo(argCallee));
+                            }
+                        }
+
+                        break;
                     }
-                    expr = memberAccess.Expression;
-                }
 
-                if (chainedBefore.Count > 0)
-                {
-                    chainedBefore.Reverse();
-                    var infos = chainedBefore.Select(s => new CalleeInfo(s)).ToList();
-                    if (isNewInvocation)
-                        callees.InsertRange(callees.Count - 1, infos);
-                    else
-                        callees.AddRange(infos);
-                }
+                    case BaseObjectCreationExpressionSyntax creation:
+                    {
+                        // Item 3: `new Foo(...)` (and target-typed `new(...)`) — the constructor
+                        // is a callee like any method call.
+                        var creationInfo = semanticModel.GetSymbolInfo(creation, cancellationToken);
+                        var ctor = (creationInfo.Symbol ?? (creationInfo.CandidateSymbols.Length == 1 ? creationInfo.CandidateSymbols[0] : null)) as IMethodSymbol;
+                        AddSimpleCallee(NormalizeSymbol(ctor));
 
-                // 1a: method groups passed as arguments to delegate-typed parameters.
-                foreach (var argCallee in GetMethodGroupArgumentCallees(invocation, semanticModel, selfNormalized, seen, cancellationToken))
-                {
-                    callees.Add(new CalleeInfo(argCallee));
+                        // Method groups passed to constructor parameters, e.g. `new Thread(Run)`.
+                        if (ctor is not null && creation.ArgumentList is { } ctorArgs)
+                        {
+                            foreach (var argCallee in GetMethodGroupArgumentCallees(ctor, ctorArgs.Arguments, semanticModel, selfNormalized, seen, localDelegateMap, cancellationToken))
+                            {
+                                callees.Add(new CalleeInfo(argCallee));
+                            }
+                        }
+
+                        break;
+                    }
+
+                    case ConstructorInitializerSyntax ctorInitializer:
+                    {
+                        // Item 3: `: this(...)` / `: base(...)` chaining when the traversed
+                        // symbol is itself a constructor.
+                        var initInfo = semanticModel.GetSymbolInfo(ctorInitializer, cancellationToken);
+                        AddSimpleCallee(NormalizeSymbol(initInfo.Symbol ?? initInfo.CandidateSymbols.FirstOrDefault()));
+                        break;
+                    }
+
+                    case AssignmentExpressionSyntax assignment:
+                    {
+                        // Item 6: property writes — `x.Prop = v` and compound forms call the
+                        // setter; this also covers object-initializer assignments. Event +=/-=
+                        // subscriptions resolve to IEventSymbol and stay with their own pass
+                        // (GetEventSubscriptionCallees); delegate variable assignments resolve to
+                        // locals/fields and stay with BuildLocalDelegateMap.
+                        var leftInfo = semanticModel.GetSymbolInfo(assignment.Left, cancellationToken);
+                        var leftSymbol = leftInfo.Symbol ?? leftInfo.CandidateSymbols.FirstOrDefault();
+                        if (leftSymbol is IPropertySymbol)
+                            AddSimpleCallee(NormalizeSymbol(leftSymbol));
+                        break;
+                    }
+
+                    case ElementAccessExpressionSyntax elementAccess:
+                    {
+                        // Item 6: indexer access resolves to the indexer property. Plain array
+                        // element access binds to no symbol and falls through.
+                        var elementInfo = semanticModel.GetSymbolInfo(elementAccess, cancellationToken);
+                        var elementTarget = elementInfo.Symbol ?? elementInfo.CandidateSymbols.FirstOrDefault();
+                        if (elementTarget is IPropertySymbol)
+                            AddSimpleCallee(NormalizeSymbol(elementTarget));
+                        break;
+                    }
+
+                    case InitializerExpressionSyntax collectionInitializer:
+                    {
+                        // Item 7: collection initializers — each element binds to an Add overload
+                        // on the created collection.
+                        foreach (var element in collectionInitializer.Expressions)
+                        {
+                            var addInfo = semanticModel.GetCollectionInitializerSymbolInfo(element, cancellationToken);
+                            AddSimpleCallee(NormalizeSymbol(addInfo.Symbol ?? addInfo.CandidateSymbols.FirstOrDefault()));
+                        }
+                        break;
+                    }
                 }
             }
 
@@ -250,46 +382,118 @@ public static class CallGraphSyntaxWalker
             yield return invocation;
     }
 
-    // 1a: for each argument that is a bare method group (not itself an invocation or lambda),
-    // resolve it and, if the corresponding parameter's type is a delegate type, treat it as a
-    // deferred call. General rule — covers Action<T...>, Func<T...>, EventHandler, ThreadStart,
-    // WaitCallback, TimerCallback, and any custom delegate type; not a hardcoded method-name list.
+    /// <summary>
+    /// Yields every call-like syntax node reachable from <paramref name="root"/> in post-order
+    /// (children before parent), matching C# evaluation order: invocations, object creations
+    /// (constructor calls), constructor initializers (<c>: this/base(...)</c>), assignments
+    /// (property setters), element accesses (indexers), and collection initializers (Add calls).
+    /// </summary>
+    private static IEnumerable<SyntaxNode> GetCallSitesPostOrder(SyntaxNode root)
+    {
+        foreach (var child in root.ChildNodes())
+            foreach (var site in GetCallSitesPostOrder(child))
+                yield return site;
+
+        switch (root)
+        {
+            case InvocationExpressionSyntax:
+            case BaseObjectCreationExpressionSyntax:
+            case ConstructorInitializerSyntax:
+            case AssignmentExpressionSyntax:
+            case ElementAccessExpressionSyntax:
+                yield return root;
+                break;
+            case InitializerExpressionSyntax init when init.IsKind(SyntaxKind.CollectionInitializerExpression):
+                yield return root;
+                break;
+        }
+    }
+
+    // 1c/4/5: resolves a call made through a delegate VALUE rather than a method group:
+    // `del(...)`, `del.Invoke(...)`, `del.BeginInvoke(...)`, `MyEvent(...)`, `MyEvent?.Invoke(...)`.
+    // Returns the event symbol for raises (a raise is a call on the event itself), the tracked
+    // method-group target for local/field delegate variables, or null when the invocation isn't
+    // delegate-shaped or nothing better than the delegate's own method is known.
+    private static ISymbol? TryResolveDelegateCallTarget(
+        InvocationExpressionSyntax invocation,
+        ISymbol? resolved,
+        SemanticModel semanticModel,
+        Dictionary<ISymbol, ISymbol> localDelegateMap,
+        CancellationToken cancellationToken)
+    {
+        if (resolved is not IMethodSymbol method)
+            return null;
+
+        ExpressionSyntax? receiverExpr;
+        if (method.MethodKind == MethodKind.DelegateInvoke)
+        {
+            receiverExpr = invocation.Expression switch
+            {
+                // `MyEvent?.Invoke(...)` — the receiver lives on the enclosing conditional access.
+                MemberBindingExpressionSyntax => invocation.FirstAncestorOrSelf<ConditionalAccessExpressionSyntax>()?.Expression,
+                // `del.Invoke(...)` / `MyEvent.Invoke(...)`
+                MemberAccessExpressionSyntax ma when ma.Name.Identifier.ValueText == "Invoke" => ma.Expression,
+                // `del(...)` / `MyEvent(...)` / `Some.Type.field(...)`
+                var direct => direct,
+            };
+        }
+        else if (method.Name is "BeginInvoke" or "EndInvoke" or "DynamicInvoke")
+        {
+            receiverExpr = invocation.Expression switch
+            {
+                MemberAccessExpressionSyntax ma => ma.Expression,
+                MemberBindingExpressionSyntax => invocation.FirstAncestorOrSelf<ConditionalAccessExpressionSyntax>()?.Expression,
+                _ => null,
+            };
+
+            // Guard against unrelated methods with the same names (e.g. Control.BeginInvoke).
+            if (receiverExpr is null || semanticModel.GetTypeInfo(receiverExpr, cancellationToken).Type?.TypeKind != TypeKind.Delegate)
+                return null;
+        }
+        else
+        {
+            return null;
+        }
+
+        if (receiverExpr is null)
+            return null;
+
+        var receiverInfo = semanticModel.GetSymbolInfo(receiverExpr, cancellationToken);
+        var receiver = receiverInfo.Symbol ?? receiverInfo.CandidateSymbols.FirstOrDefault();
+
+        if (receiver is IEventSymbol)
+            return receiver.OriginalDefinition;
+
+        var normalizedReceiver = NormalizeSymbol(receiver);
+        if (normalizedReceiver != null && localDelegateMap.TryGetValue(normalizedReceiver, out var target))
+            return target;
+
+        return null;
+    }
+
+    // 1a: for each argument that is a method group — bare, delegate-creation-wrapped
+    // (`new ThreadStart(Run)`), or cast-wrapped (`(Action)Run`) — resolve it and, if the
+    // corresponding parameter's type is a delegate type, treat it as a deferred call. Delegate
+    // variables tracked by BuildLocalDelegateMap redirect to their assigned target the same way.
+    // General rule — covers Action<T...>, Func<T...>, EventHandler, ThreadStart, WaitCallback,
+    // TimerCallback, and any custom delegate type; not a hardcoded method-name list. Shared by
+    // ordinary invocations and constructor calls (e.g. `new Thread(Run)`).
     // Named/reordered arguments are matched positionally — a known, accepted limitation.
     private static IEnumerable<ISymbol> GetMethodGroupArgumentCallees(
-        InvocationExpressionSyntax invocation,
+        IMethodSymbol invokedMethod,
+        SeparatedSyntaxList<ArgumentSyntax> args,
         SemanticModel semanticModel,
         ISymbol? selfNormalized,
         HashSet<ISymbol> seen,
+        Dictionary<ISymbol, ISymbol> localDelegateMap,
         CancellationToken cancellationToken)
     {
-        var symbolInfo = semanticModel.GetSymbolInfo(invocation, cancellationToken);
-        var invokedMethod = symbolInfo.Symbol as IMethodSymbol
-            ?? symbolInfo.CandidateSymbols.OfType<IMethodSymbol>().FirstOrDefault();
-        if (invokedMethod is null)
-        {
-            yield break;
-        }
-
         var parameters = invokedMethod.Parameters;
-        var args = invocation.ArgumentList.Arguments;
 
         for (int i = 0; i < args.Count; i++)
         {
-            var argExpr = args[i].Expression;
-            if (argExpr is not (IdentifierNameSyntax or MemberAccessExpressionSyntax))
-            {
-                continue;
-            }
-
-            var argSymbolInfo = semanticModel.GetSymbolInfo(argExpr, cancellationToken);
-            var argSymbol = argSymbolInfo.Symbol ?? argSymbolInfo.CandidateSymbols.FirstOrDefault();
-            var normalizedArg = NormalizeSymbol(argSymbol);
-            if (normalizedArg is not IMethodSymbol methodGroupTarget || !IsSupportedCalleeSymbol(methodGroupTarget))
-            {
-                continue;
-            }
-
-            if (SymbolEqualityComparer.Default.Equals(methodGroupTarget, selfNormalized))
+            var argExpr = UnwrapMethodGroupExpression(args[i].Expression);
+            if (argExpr is null)
             {
                 continue;
             }
@@ -303,9 +507,25 @@ public static class CallGraphSyntaxWalker
                 continue;
             }
 
-            if (seen.Add(methodGroupTarget))
+            var argSymbolInfo = semanticModel.GetSymbolInfo(argExpr, cancellationToken);
+            var argSymbol = argSymbolInfo.Symbol ?? argSymbolInfo.CandidateSymbols.FirstOrDefault();
+            var normalizedArg = NormalizeSymbol(argSymbol);
+
+            ISymbol? target = normalizedArg switch
             {
-                yield return methodGroupTarget;
+                IMethodSymbol methodGroupTarget when IsSupportedCalleeSymbol(methodGroupTarget) => methodGroupTarget,
+                not null when localDelegateMap.TryGetValue(normalizedArg, out var redirected) => redirected,
+                _ => null,
+            };
+
+            if (target is null || SymbolEqualityComparer.Default.Equals(target, selfNormalized))
+            {
+                continue;
+            }
+
+            if (seen.Add(target))
+            {
+                yield return target;
             }
         }
     }
@@ -331,12 +551,13 @@ public static class CallGraphSyntaxWalker
                 continue;
             }
 
-            if (assignment.Right is not (IdentifierNameSyntax or MemberAccessExpressionSyntax))
+            var rightExpr = UnwrapMethodGroupExpression(assignment.Right);
+            if (rightExpr is null)
             {
                 continue;
             }
 
-            var rightInfo = semanticModel.GetSymbolInfo(assignment.Right, cancellationToken);
+            var rightInfo = semanticModel.GetSymbolInfo(rightExpr, cancellationToken);
             var rightSymbol = rightInfo.Symbol ?? rightInfo.CandidateSymbols.FirstOrDefault();
             var normalized = NormalizeSymbol(rightSymbol);
             if (normalized is not IMethodSymbol handlerMethod || !IsSupportedCalleeSymbol(handlerMethod))
@@ -368,8 +589,8 @@ public static class CallGraphSyntaxWalker
 
         foreach (var declarator in root.DescendantNodesAndSelf().OfType<VariableDeclaratorSyntax>())
         {
-            var valueExpr = declarator.Initializer?.Value;
-            if (valueExpr is not (IdentifierNameSyntax or MemberAccessExpressionSyntax))
+            var valueExpr = UnwrapMethodGroupExpression(declarator.Initializer?.Value);
+            if (valueExpr is null)
             {
                 continue;
             }
@@ -396,12 +617,11 @@ public static class CallGraphSyntaxWalker
                 continue;
             }
 
-            if (assignment.Right is not IdentifierNameSyntax and not MemberAccessExpressionSyntax)
+            var valueExpr = UnwrapMethodGroupExpression(assignment.Right);
+            if (valueExpr is null)
             {
                 continue;
             }
-
-            var valueExpr = assignment.Right;
 
             var leftInfo = semanticModel.GetSymbolInfo(assignment.Left, cancellationToken);
             ITypeSymbol? leftType = leftInfo.Symbol switch

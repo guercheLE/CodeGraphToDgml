@@ -10,6 +10,8 @@ public sealed record TraversalOptions
 
     public bool IncludeEvents { get; init; } = true;
 
+    public bool IncludeConstructors { get; init; } = true;
+
     public bool IncludeExternalSymbols { get; init; }
 
     public bool IncludeGeneratedCode { get; init; }

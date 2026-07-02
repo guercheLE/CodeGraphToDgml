@@ -59,6 +59,12 @@ internal class General : BaseOptionModel<General>
     public bool IncludeEvents { get; set; } = true;
 
     [Category("Traversal")]
+    [DisplayName("Include constructors")]
+    [Description("When enabled, object instantiations (new expressions) and constructor chaining (this/base initializers) appear as calls in Traverse Down graphs and sequence diagrams.")]
+    [DefaultValue(true)]
+    public bool IncludeConstructors { get; set; } = true;
+
+    [Category("Traversal")]
     [DisplayName("Include external symbols")]
     [Description("When enabled, symbols from referenced assemblies can appear in the graph.")]
     [DefaultValue(false)]
@@ -160,6 +166,7 @@ internal class General : BaseOptionModel<General>
             MaxNodeCount = MaxNodeCount,
             IncludeProperties = IncludeProperties,
             IncludeEvents = IncludeEvents,
+            IncludeConstructors = IncludeConstructors,
             IncludeExternalSymbols = IncludeExternalSymbols,
             IncludeGeneratedCode = IncludeGeneratedCode,
             IncludeComponentHosts = IncludeComponentHosts,

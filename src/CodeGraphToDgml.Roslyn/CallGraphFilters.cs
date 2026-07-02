@@ -48,6 +48,7 @@ public static class CallGraphFilters
     {
         return symbol.Kind switch
         {
+            SymbolKind.Method when symbol is IMethodSymbol { MethodKind: MethodKind.Constructor } => options.IncludeConstructors,
             SymbolKind.Method => true,
             SymbolKind.Property => options.IncludeProperties,
             SymbolKind.Event => options.IncludeEvents,
