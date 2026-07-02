@@ -219,6 +219,7 @@ public sealed class MermaidSequenceSerializer
         sb.AppendLine("render().catch(err => {");
         sb.AppendLine("  document.getElementById('diagram-container').innerHTML =");
         sb.AppendLine("    '<pre style=\"color:red;padding:16px\">' + err.message + '</pre>';");
+        sb.AppendLine("  document.getElementById('dseq')?.remove(); // mermaid leaves its error SVG in <body>");
         sb.AppendLine("});");
         sb.AppendLine("</script>");
         sb.AppendLine("</body>");
@@ -236,7 +237,17 @@ public sealed class MermaidSequenceSerializer
         public int EndMessage { get; set; }
         public List<string> ParticipantIds { get; set; } = new List<string>();
         public List<string> BoundaryFromPrev { get; set; } = new List<string>();
-        public List<string> SplitBoundary { get; set; } = new List<string>();
+
+        // When this segment is a sub-part of a single oversized call, the parent call whose
+        // execution spans every sub-part. Rendered exactly like the «Caller» wrap: the first
+        // sub-part shows the real opening arrow (caller->>+callee: label), middle sub-parts keep
+        // the bars alive with bare activate/deactivate, and the last sub-part shows the return.
+        public string? SplitParentCallerId { get; set; }
+        public string? SplitParentCalleeId { get; set; }
+        public string? SplitParentLabel { get; set; }
+        public bool IsFirstSubPart { get; set; }
+        public bool IsLastSubPart { get; set; }
+
         public string? PrevPart { get; set; }
         public string? NextPart { get; set; }
         public string? PrevTitle { get; set; }
@@ -327,7 +338,6 @@ public sealed class MermaidSequenceSerializer
 
         var allPlans = new List<SegmentPlan>();
         int phaseNumber = 1;
-        int msgCounter = 1;
 
         foreach (var phase in phases)
         {
@@ -375,23 +385,14 @@ public sealed class MermaidSequenceSerializer
 
             bool hasSubParts = subSegs.Count > 1;
 
-            // When a single oversized call is split into sub-parts, its caller and callee
-            // are still "in flight" across every sub-segment — record them so the renderer
-            // can emit activate/deactivate to show the active execution context.
-            List<string>? splitBoundary = null;
-            if (hasSubParts && phase.Count == 1)
-            {
-                splitBoundary = new List<string>
-                {
-                    phase[0].CallerParticipantId,
-                    phase[0].CalleeParticipantId,
-                };
-            }
+            // When a single oversized call is split into sub-parts, that parent call is still
+            // "in flight" across every sub-segment — record it so the renderer can span its
+            // opening arrow, activation bars, and return across the sub-parts.
+            CallSequenceCallNode? splitParent = hasSubParts && phase.Count == 1 ? phase[0] : null;
 
             for (int subIdx = 0; subIdx < subSegs.Count; subIdx++)
             {
                 var (calls, parts) = subSegs[subIdx];
-                int arrowCount = CountArrows(calls, stackedBars);
 
                 string partNumber = hasSubParts
                     ? phaseNumber.ToString() + (char)('A' + subIdx)
@@ -401,15 +402,16 @@ public sealed class MermaidSequenceSerializer
                 {
                     PartNumber = partNumber,
                     Title = InferTitle(calls),
-                    StartMessage = msgCounter,
-                    EndMessage = arrowCount > 0 ? msgCounter + arrowCount - 1 : msgCounter,
                     ParticipantIds = new List<string>(parts),
-                    SplitBoundary = splitBoundary ?? new List<string>(),
+                    SplitParentCallerId = splitParent?.CallerParticipantId,
+                    SplitParentCalleeId = splitParent?.CalleeParticipantId,
+                    SplitParentLabel = splitParent?.MessageLabel,
+                    IsFirstSubPart = splitParent != null && subIdx == 0,
+                    IsLastSubPart = splitParent != null && subIdx == subSegs.Count - 1,
                     VirtualRootCalls = calls,
                 };
 
                 allPlans.Add(plan);
-                msgCounter += arrowCount > 0 ? arrowCount : 1;
             }
 
             phaseNumber++;
@@ -428,6 +430,30 @@ public sealed class MermaidSequenceSerializer
         {
             allPlans[0].IsFirstSegment = true;
             allPlans[allPlans.Count - 1].IsLastSegment = true;
+        }
+
+        // Global message numbering, done last because it depends on the first/last flags: the
+        // «Caller» wrap and split-parent arrows are real numbered arrows in the rendered
+        // diagrams, so they must be counted or every subsequent autonumber start drifts.
+        bool hasCallerWrap = !string.IsNullOrEmpty(sequence.RootParticipantId);
+        int msgCounter = 1;
+        foreach (var plan in allPlans)
+        {
+            int arrows = CountArrows(plan.VirtualRootCalls, stackedBars);
+            if (hasCallerWrap)
+            {
+                if (plan.IsFirstSegment) arrows++;                    // Caller->>Root opening arrow
+                if (plan.IsLastSegment && stackedBars) arrows++;      // Root-->>Caller return arrow
+            }
+            if (plan.SplitParentCalleeId != null)
+            {
+                if (plan.IsFirstSubPart) arrows++;                    // parent call opening arrow
+                if (plan.IsLastSubPart && stackedBars) arrows++;      // parent call return arrow
+            }
+
+            plan.StartMessage = msgCounter;
+            plan.EndMessage = arrows > 0 ? msgCounter + arrows - 1 : msgCounter;
+            msgCounter += arrows > 0 ? arrows : 1;
         }
 
         return allPlans;
@@ -608,18 +634,32 @@ public sealed class MermaidSequenceSerializer
         if (segSet.Count > 0 && plan.VirtualRootCalls.Count > 0)
             sb.AppendLine();
 
-        if (stackedBars && plan.SplitBoundary.Count > 0)
-        {
-            foreach (var p in plan.SplitBoundary)
-                sb.Append("    activate ").AppendLine(p);
-        }
+        // Every segment must keep Mermaid's activation stack balanced on its own: an arrow's '+'
+        // activates the RECEIVER and a return's '-' deactivates the SENDER, so a bar that spans
+        // segments is opened by the real arrow '+' in its first segment (or a bare activate in
+        // later ones) and closed by a bare deactivate (non-last segments) or the return arrow's
+        // '-' (its last segment). Two bars span this way: the root method's (opened by the
+        // «Caller» arrow, spanning ALL segments) and, for sub-parts of a single oversized call,
+        // that split parent call's callee (opened by the parent-call arrow, spanning the
+        // sub-parts). The Caller's own bar exists only on non-first segments, opened and closed
+        // with bare activate/deactivate.
+        bool hasSplitParent = plan.SplitParentCalleeId != null;
+        // The split parent's caller is normally the root method itself, whose bar the «Caller»
+        // wrap already manages; only give it its own bar when the wrap doesn't cover it.
+        bool splitCallerNeedsOwnBar = hasSplitParent
+            && !(hasCaller && plan.SplitParentCallerId == sequence.RootParticipantId);
 
         if (hasCaller && stackedBars)
         {
             if (plan.IsFirstSegment)
+            {
                 sb.Append("    ").Append(callerId).Append("->>+").Append(sequence.RootParticipantId).Append(": ").AppendLine(EscapeLabel(sequence.RootMethodLabel));
+            }
             else
+            {
                 sb.Append("    activate ").AppendLine(callerId);
+                sb.Append("    activate ").AppendLine(sequence.RootParticipantId);
+            }
         }
         else if (hasCaller && plan.IsFirstSegment)
         {
@@ -627,21 +667,47 @@ public sealed class MermaidSequenceSerializer
             sb.Append("    ").Append(callerId).Append("->>").Append(sequence.RootParticipantId).Append(": ").AppendLine(EscapeLabel(sequence.RootMethodLabel));
         }
 
+        if (hasSplitParent)
+        {
+            if (stackedBars)
+            {
+                if (splitCallerNeedsOwnBar)
+                    sb.Append("    activate ").AppendLine(plan.SplitParentCallerId);
+
+                if (plan.IsFirstSubPart)
+                    sb.Append("    ").Append(plan.SplitParentCallerId).Append("->>+").Append(plan.SplitParentCalleeId).Append(": ").AppendLine(EscapeLabel(plan.SplitParentLabel ?? ""));
+                else
+                    sb.Append("    activate ").AppendLine(plan.SplitParentCalleeId);
+            }
+            else if (plan.IsFirstSubPart)
+            {
+                sb.Append("    ").Append(plan.SplitParentCallerId).Append("->>").Append(plan.SplitParentCalleeId).Append(": ").AppendLine(EscapeLabel(plan.SplitParentLabel ?? ""));
+            }
+        }
+
         foreach (var call in plan.VirtualRootCalls)
             EmitCall(sb, call, stackedBars);
+
+        if (hasSplitParent && stackedBars)
+        {
+            if (plan.IsLastSubPart)
+                sb.Append("    ").Append(plan.SplitParentCalleeId).Append("-->>-").Append(plan.SplitParentCallerId).AppendLine(": ");
+            else
+                sb.Append("    deactivate ").AppendLine(plan.SplitParentCalleeId);
+
+            if (splitCallerNeedsOwnBar)
+                sb.Append("    deactivate ").AppendLine(plan.SplitParentCallerId);
+        }
 
         if (hasCaller && stackedBars)
         {
             if (plan.IsLastSegment)
                 sb.Append("    ").Append(sequence.RootParticipantId).Append("-->>-").Append(callerId).AppendLine(": ");
             else
-                sb.Append("    deactivate ").AppendLine(callerId);
-        }
+                sb.Append("    deactivate ").AppendLine(sequence.RootParticipantId);
 
-        if (stackedBars && plan.SplitBoundary.Count > 0)
-        {
-            for (int i = plan.SplitBoundary.Count - 1; i >= 0; i--)
-                sb.Append("    deactivate ").AppendLine(plan.SplitBoundary[i]);
+            if (!plan.IsFirstSegment)
+                sb.Append("    deactivate ").AppendLine(callerId);
         }
 
         while (sb.Length > 0 && (sb[sb.Length - 1] == '\r' || sb[sb.Length - 1] == '\n'))
@@ -846,6 +912,7 @@ public sealed class MermaidSequenceSerializer
         sb.AppendLine("      svgText = result.svg;");
         sb.AppendLine("    } catch (err) {");
         sb.AppendLine("      wrap.innerHTML = '<pre style=\"color:red;padding:16px\">' + err.message + '</pre>';");
+        sb.AppendLine("      document.getElementById('dseq-' + i)?.remove(); // mermaid leaves its error SVG in <body>");
         sb.AppendLine("      continue;");
         sb.AppendLine("    }");
         sb.AppendLine("    wrap.innerHTML = svgText;");
