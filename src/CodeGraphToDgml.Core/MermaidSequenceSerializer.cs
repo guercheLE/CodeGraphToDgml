@@ -229,6 +229,22 @@ public sealed class MermaidSequenceSerializer
 
     // ── Segment metadata ──────────────────────────────────────────────────────
 
+    // When a segment is a sub-part of an oversized call, that parent call's execution spans
+    // every sub-part. Rendered exactly like the «Caller» wrap: the sub-part that opens it shows
+    // the real opening arrow (caller->>+callee: label), sub-parts in between keep the bar alive
+    // with bare activate/deactivate, and the sub-part that closes it shows the return. A leaf
+    // segment can be nested inside several such spans at once — e.g. a big call split into
+    // 1A/1B/1C, where 1C is itself a single oversized call split further into 1C1/1C2 — so each
+    // leaf carries an ordered stack of frames, outermost first.
+    private sealed class SplitFrame
+    {
+        public string CallerParticipantId { get; set; } = "";
+        public string CalleeParticipantId { get; set; } = "";
+        public string MessageLabel { get; set; } = "";
+        public bool IsFirstSubPart { get; set; }
+        public bool IsLastSubPart { get; set; }
+    }
+
     private sealed class SegmentPlan
     {
         public string PartNumber { get; set; } = "";
@@ -238,15 +254,7 @@ public sealed class MermaidSequenceSerializer
         public List<string> ParticipantIds { get; set; } = new List<string>();
         public List<string> BoundaryFromPrev { get; set; } = new List<string>();
 
-        // When this segment is a sub-part of a single oversized call, the parent call whose
-        // execution spans every sub-part. Rendered exactly like the «Caller» wrap: the first
-        // sub-part shows the real opening arrow (caller->>+callee: label), middle sub-parts keep
-        // the bars alive with bare activate/deactivate, and the last sub-part shows the return.
-        public string? SplitParentCallerId { get; set; }
-        public string? SplitParentCalleeId { get; set; }
-        public string? SplitParentLabel { get; set; }
-        public bool IsFirstSubPart { get; set; }
-        public bool IsLastSubPart { get; set; }
+        public List<SplitFrame> SplitParents { get; set; } = new List<SplitFrame>();
 
         public string? PrevPart { get; set; }
         public string? NextPart { get; set; }
@@ -344,75 +352,8 @@ public sealed class MermaidSequenceSerializer
             var phaseParts = GetCallListParticipants(phase);
             phaseParts.UnionWith(rootBoundary);
 
-            List<(List<CallSequenceCallNode> Calls, HashSet<string> Participants)> subSegs;
-            if (phaseParts.Count <= maxParticipants)
-            {
-                subSegs = new List<(List<CallSequenceCallNode>, HashSet<string>)> { (phase, phaseParts) };
-            }
-            else
-            {
-                // The only way a phase can still exceed the cap here is a single root call whose
-                // own subtree alone exceeds it (SegmentCalls already keeps every multi-call phase
-                // under the cap) — split that call's nested calls instead, keeping its own
-                // caller/callee as an always-present boundary across every sub-part.
-                var parentCall = phase[0];
-                var boundary = new HashSet<string>(StringComparer.Ordinal)
-                {
-                    parentCall.CallerParticipantId,
-                    parentCall.CalleeParticipantId,
-                };
-
-                var subPhases = parentCall.NestedCalls.Count == 0
-                    ? [new List<CallSequenceCallNode>(phase)]
-                    : SegmentCalls(parentCall.NestedCalls, boundary, maxParticipants, maxMessages, stackedBars);
-
-                if (subPhases.Count <= 1)
-                {
-                    subSegs = new List<(List<CallSequenceCallNode>, HashSet<string>)> { (phase, phaseParts) };
-                }
-                else
-                {
-                    subSegs = subPhases
-                        .Select(calls =>
-                        {
-                            var parts = GetCallListParticipants(calls);
-                            parts.UnionWith(boundary);
-                            return (calls, parts);
-                        })
-                        .ToList();
-                }
-            }
-
-            bool hasSubParts = subSegs.Count > 1;
-
-            // When a single oversized call is split into sub-parts, that parent call is still
-            // "in flight" across every sub-segment — record it so the renderer can span its
-            // opening arrow, activation bars, and return across the sub-parts.
-            CallSequenceCallNode? splitParent = hasSubParts && phase.Count == 1 ? phase[0] : null;
-
-            for (int subIdx = 0; subIdx < subSegs.Count; subIdx++)
-            {
-                var (calls, parts) = subSegs[subIdx];
-
-                string partNumber = hasSubParts
-                    ? phaseNumber.ToString() + (char)('A' + subIdx)
-                    : phaseNumber.ToString();
-
-                var plan = new SegmentPlan
-                {
-                    PartNumber = partNumber,
-                    Title = InferTitle(calls),
-                    ParticipantIds = new List<string>(parts),
-                    SplitParentCallerId = splitParent?.CallerParticipantId,
-                    SplitParentCalleeId = splitParent?.CalleeParticipantId,
-                    SplitParentLabel = splitParent?.MessageLabel,
-                    IsFirstSubPart = splitParent != null && subIdx == 0,
-                    IsLastSubPart = splitParent != null && subIdx == subSegs.Count - 1,
-                    VirtualRootCalls = calls,
-                };
-
-                allPlans.Add(plan);
-            }
+            allPlans.AddRange(ExpandPhase(phase, phaseParts, phaseNumber.ToString(), depth: 1,
+                maxParticipants, maxMessages, stackedBars));
 
             phaseNumber++;
         }
@@ -445,10 +386,10 @@ public sealed class MermaidSequenceSerializer
                 if (plan.IsFirstSegment) arrows++;                    // Caller->>Root opening arrow
                 if (plan.IsLastSegment && stackedBars) arrows++;      // Root-->>Caller return arrow
             }
-            if (plan.SplitParentCalleeId != null)
+            foreach (var frame in plan.SplitParents)
             {
-                if (plan.IsFirstSubPart) arrows++;                    // parent call opening arrow
-                if (plan.IsLastSubPart && stackedBars) arrows++;      // parent call return arrow
+                if (frame.IsFirstSubPart) arrows++;                   // parent call opening arrow
+                if (frame.IsLastSubPart && stackedBars) arrows++;     // parent call return arrow
             }
 
             plan.StartMessage = msgCounter;
@@ -458,6 +399,86 @@ public sealed class MermaidSequenceSerializer
 
         return allPlans;
     }
+
+    // Recursively expands one phase (or one sub-part of an already-split call) into leaf
+    // segments that each fit the caps. A phase can only still be oversized here because it's a
+    // single call whose own subtree exceeds the cap (SegmentCalls already keeps every multi-call
+    // group under it) — in that case, split that call's NestedCalls the same way, and recurse
+    // into each resulting piece so a sub-part that's itself oversized keeps splitting instead of
+    // being emitted as one big chunk.
+    private static List<SegmentPlan> ExpandPhase(
+        List<CallSequenceCallNode> calls,
+        HashSet<string> participants,
+        string partNumber,
+        int depth,
+        int maxParticipants,
+        int maxMessages,
+        bool stackedBars)
+    {
+        if (participants.Count <= maxParticipants || calls.Count != 1)
+            return [MakeLeafPlan(calls, participants, partNumber)];
+
+        var parentCall = calls[0];
+        var boundary = new HashSet<string>(StringComparer.Ordinal)
+        {
+            parentCall.CallerParticipantId,
+            parentCall.CalleeParticipantId,
+        };
+
+        var subPhases = parentCall.NestedCalls.Count == 0
+            ? [new List<CallSequenceCallNode>(calls)]
+            : SegmentCalls(parentCall.NestedCalls, boundary, maxParticipants, maxMessages, stackedBars);
+
+        if (subPhases.Count <= 1)
+            return [MakeLeafPlan(calls, participants, partNumber)];
+
+        var leaves = new List<SegmentPlan>();
+        for (int i = 0; i < subPhases.Count; i++)
+        {
+            var subCalls = subPhases[i];
+            var subParts = GetCallListParticipants(subCalls);
+            subParts.UnionWith(boundary);
+
+            var childPartNumber = ChildPartNumber(partNumber, i, depth);
+            leaves.AddRange(ExpandPhase(subCalls, subParts, childPartNumber, depth + 1,
+                maxParticipants, maxMessages, stackedBars));
+        }
+
+        // The parent call is "in flight" across every leaf produced above — the first leaf opens
+        // it with the real arrow, the last leaf closes it, everything in between just keeps its
+        // bars alive.
+        for (int i = 0; i < leaves.Count; i++)
+        {
+            leaves[i].SplitParents.Insert(0, new SplitFrame
+            {
+                CallerParticipantId = parentCall.CallerParticipantId,
+                CalleeParticipantId = parentCall.CalleeParticipantId,
+                MessageLabel = parentCall.MessageLabel,
+                IsFirstSubPart = i == 0,
+                IsLastSubPart = i == leaves.Count - 1,
+            });
+        }
+
+        return leaves;
+    }
+
+    private static SegmentPlan MakeLeafPlan(List<CallSequenceCallNode> calls, HashSet<string> participants, string partNumber)
+        => new()
+        {
+            PartNumber = partNumber,
+            Title = InferTitle(calls),
+            ParticipantIds = new List<string>(participants),
+            VirtualRootCalls = calls,
+        };
+
+    // Alternates the sub-part numbering style by nesting depth so a second-level split reads
+    // distinctly from the first: depth 1 (splitting a phase) appends a letter (1 -> 1A, 1B, 1C),
+    // depth 2 (splitting an oversized sub-part like 1C) appends a digit (1C -> 1C1, 1C2), depth 3
+    // appends a letter again, and so on for arbitrarily deep recursion.
+    private static string ChildPartNumber(string parentPartNumber, int index, int depth)
+        => depth % 2 == 1
+            ? parentPartNumber + (char)('A' + index)
+            : parentPartNumber + (index + 1).ToString();
 
     // Shared segmentation primitive used both for grouping top-level RootCalls into phases
     // (boundaryParticipants empty) and for splitting a single oversized call's NestedCalls into
@@ -638,16 +659,21 @@ public sealed class MermaidSequenceSerializer
         // activates the RECEIVER and a return's '-' deactivates the SENDER, so a bar that spans
         // segments is opened by the real arrow '+' in its first segment (or a bare activate in
         // later ones) and closed by a bare deactivate (non-last segments) or the return arrow's
-        // '-' (its last segment). Two bars span this way: the root method's (opened by the
-        // «Caller» arrow, spanning ALL segments) and, for sub-parts of a single oversized call,
-        // that split parent call's callee (opened by the parent-call arrow, spanning the
-        // sub-parts). The Caller's own bar exists only on non-first segments, opened and closed
-        // with bare activate/deactivate.
-        bool hasSplitParent = plan.SplitParentCalleeId != null;
-        // The split parent's caller is normally the root method itself, whose bar the «Caller»
-        // wrap already manages; only give it its own bar when the wrap doesn't cover it.
+        // '-' (its last segment). Bars span this way for the root method's (opened by the
+        // «Caller» arrow, spanning ALL segments) and, for sub-parts of an oversized call, each
+        // split-parent call's callee (opened by that parent-call arrow, spanning its sub-parts) —
+        // a leaf can be nested inside several such spans when a sub-part was itself split further
+        // (e.g. 1C1/1C2 inside 1C inside 1). Frames are rendered outermost-first on open and
+        // innermost-first on close, mirroring how nested real calls stack via EmitCall. The
+        // Caller's own bar exists only on non-first segments, opened and closed with bare
+        // activate/deactivate.
+        bool hasSplitParent = plan.SplitParents.Count > 0;
+        // Only the outermost split frame's caller can coincide with the root method (every inner
+        // frame's caller is the immediately-outer frame's callee, whose bar that outer frame
+        // already manages) — the root's bar is itself covered by the «Caller» wrap, so only give
+        // the outermost frame its own bar when the wrap doesn't already cover it.
         bool splitCallerNeedsOwnBar = hasSplitParent
-            && !(hasCaller && plan.SplitParentCallerId == sequence.RootParticipantId);
+            && !(hasCaller && plan.SplitParents[0].CallerParticipantId == sequence.RootParticipantId);
 
         if (hasCaller && stackedBars)
         {
@@ -672,16 +698,23 @@ public sealed class MermaidSequenceSerializer
             if (stackedBars)
             {
                 if (splitCallerNeedsOwnBar)
-                    sb.Append("    activate ").AppendLine(plan.SplitParentCallerId);
+                    sb.Append("    activate ").AppendLine(plan.SplitParents[0].CallerParticipantId);
 
-                if (plan.IsFirstSubPart)
-                    sb.Append("    ").Append(plan.SplitParentCallerId).Append("->>+").Append(plan.SplitParentCalleeId).Append(": ").AppendLine(EscapeLabel(plan.SplitParentLabel ?? ""));
-                else
-                    sb.Append("    activate ").AppendLine(plan.SplitParentCalleeId);
+                foreach (var frame in plan.SplitParents)
+                {
+                    if (frame.IsFirstSubPart)
+                        sb.Append("    ").Append(frame.CallerParticipantId).Append("->>+").Append(frame.CalleeParticipantId).Append(": ").AppendLine(EscapeLabel(frame.MessageLabel));
+                    else
+                        sb.Append("    activate ").AppendLine(frame.CalleeParticipantId);
+                }
             }
-            else if (plan.IsFirstSubPart)
+            else
             {
-                sb.Append("    ").Append(plan.SplitParentCallerId).Append("->>").Append(plan.SplitParentCalleeId).Append(": ").AppendLine(EscapeLabel(plan.SplitParentLabel ?? ""));
+                foreach (var frame in plan.SplitParents)
+                {
+                    if (frame.IsFirstSubPart)
+                        sb.Append("    ").Append(frame.CallerParticipantId).Append("->>").Append(frame.CalleeParticipantId).Append(": ").AppendLine(EscapeLabel(frame.MessageLabel));
+                }
             }
         }
 
@@ -690,13 +723,17 @@ public sealed class MermaidSequenceSerializer
 
         if (hasSplitParent && stackedBars)
         {
-            if (plan.IsLastSubPart)
-                sb.Append("    ").Append(plan.SplitParentCalleeId).Append("-->>-").Append(plan.SplitParentCallerId).AppendLine(": ");
-            else
-                sb.Append("    deactivate ").AppendLine(plan.SplitParentCalleeId);
+            for (int i = plan.SplitParents.Count - 1; i >= 0; i--)
+            {
+                var frame = plan.SplitParents[i];
+                if (frame.IsLastSubPart)
+                    sb.Append("    ").Append(frame.CalleeParticipantId).Append("-->>-").Append(frame.CallerParticipantId).AppendLine(": ");
+                else
+                    sb.Append("    deactivate ").AppendLine(frame.CalleeParticipantId);
+            }
 
             if (splitCallerNeedsOwnBar)
-                sb.Append("    deactivate ").AppendLine(plan.SplitParentCallerId);
+                sb.Append("    deactivate ").AppendLine(plan.SplitParents[0].CallerParticipantId);
         }
 
         if (hasCaller && stackedBars)
