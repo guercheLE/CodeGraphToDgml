@@ -84,10 +84,10 @@ internal sealed class TraverseDownToSequenceOperationService
             string? mdPath = null;
             string? htmlPath = null;
 
+            var tempDir = await TempDirectoryHelper.GetOutputDirectoryAsync(_package).ConfigureAwait(false);
+
             await Task.Run(() =>
             {
-                var tempDir = Path.GetTempPath();
-
                 if (format == SequenceDiagramOutputFormat.Markdown || format == SequenceDiagramOutputFormat.Both)
                 {
                     mdPath = Path.Combine(tempDir, $"CodeSequence-{timestamp}.md");

@@ -86,7 +86,8 @@ internal sealed class DgmlDocumentService
 
     public async Task<DgmlDocumentSession> OpenOrCreateTemporaryDocumentAsync()
     {
-        var filePath = Path.Combine(Path.GetTempPath(), $"CodeGraph-{DateTime.Now:yyyyMMdd-HHmmssfff}.dgml");
+        var directory = await TempDirectoryHelper.GetOutputDirectoryAsync(_package).ConfigureAwait(true);
+        var filePath = Path.Combine(directory, $"CodeGraph-{DateTime.Now:yyyyMMdd-HHmmssfff}.dgml");
         File.WriteAllText(filePath, new DgmlSerializer().CreateEmptyText(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         return await OpenDocumentSessionAsync(filePath).ConfigureAwait(true);
     }
