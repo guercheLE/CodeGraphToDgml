@@ -224,6 +224,27 @@ internal static class RoslynGraphHelpers
     }
 
     /// <summary>
+    /// Returns a short display string for a symbol's return/value type (e.g. "int", "bool"), for
+    /// labelling sequence-diagram return arrows with what's handed back. Empty for void methods,
+    /// constructors, events, and any symbol kind with no meaningful value to report.
+    /// </summary>
+    internal static string GetReturnTypeLabel(ISymbol symbol)
+    {
+        ITypeSymbol? type = symbol switch
+        {
+            IMethodSymbol method => method.ReturnType,
+            IPropertySymbol property => property.Type,
+            IFieldSymbol field => field.Type,
+            _ => null,
+        };
+
+        if (type is null || type.SpecialType == SpecialType.System_Void)
+            return "";
+
+        return type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
+    }
+
+    /// <summary>
     /// Returns the source file path and 1-based line number of a symbol's declaration identifier.
     /// Prefers <see cref="ISymbol.Locations"/> (which Roslyn sets to the identifier token for
     /// named source symbols) and falls back to scanning the declaring syntax node's child tokens

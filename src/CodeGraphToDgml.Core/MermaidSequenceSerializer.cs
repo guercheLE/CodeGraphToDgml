@@ -82,7 +82,7 @@ public sealed class MermaidSequenceSerializer
             sb.Append("    ").Append(callerId).Append("->>+").Append(sequence.RootParticipantId).Append(": ").AppendLine(rootLabel);
             foreach (var call in sequence.RootCalls)
                 EmitCall(sb, call, stackedActivationBars);
-            sb.Append("    ").Append(sequence.RootParticipantId).Append("-->>-").Append(callerId).AppendLine(": ");
+            sb.Append("    ").Append(sequence.RootParticipantId).Append("-->>-").Append(callerId).Append(": ").AppendLine(EscapeLabel(BuildReturnLabel(sequence.RootMethodLabel, sequence.RootReturnTypeLabel)));
         }
         else
         {
@@ -241,6 +241,7 @@ public sealed class MermaidSequenceSerializer
         public string CallerParticipantId { get; set; } = "";
         public string CalleeParticipantId { get; set; } = "";
         public string MessageLabel { get; set; } = "";
+        public string ReturnTypeLabel { get; set; } = "";
         public bool IsFirstSubPart { get; set; }
         public bool IsLastSubPart { get; set; }
     }
@@ -454,6 +455,7 @@ public sealed class MermaidSequenceSerializer
                 CallerParticipantId = parentCall.CallerParticipantId,
                 CalleeParticipantId = parentCall.CalleeParticipantId,
                 MessageLabel = parentCall.MessageLabel,
+                ReturnTypeLabel = parentCall.ReturnTypeLabel,
                 IsFirstSubPart = i == 0,
                 IsLastSubPart = i == leaves.Count - 1,
             });
@@ -727,7 +729,7 @@ public sealed class MermaidSequenceSerializer
             {
                 var frame = plan.SplitParents[i];
                 if (frame.IsLastSubPart)
-                    sb.Append("    ").Append(frame.CalleeParticipantId).Append("-->>-").Append(frame.CallerParticipantId).AppendLine(": ");
+                    sb.Append("    ").Append(frame.CalleeParticipantId).Append("-->>-").Append(frame.CallerParticipantId).Append(": ").AppendLine(EscapeLabel(BuildReturnLabel(frame.MessageLabel, frame.ReturnTypeLabel)));
                 else
                     sb.Append("    deactivate ").AppendLine(frame.CalleeParticipantId);
             }
@@ -739,7 +741,7 @@ public sealed class MermaidSequenceSerializer
         if (hasCaller && stackedBars)
         {
             if (plan.IsLastSegment)
-                sb.Append("    ").Append(sequence.RootParticipantId).Append("-->>-").Append(callerId).AppendLine(": ");
+                sb.Append("    ").Append(sequence.RootParticipantId).Append("-->>-").Append(callerId).Append(": ").AppendLine(EscapeLabel(BuildReturnLabel(sequence.RootMethodLabel, sequence.RootReturnTypeLabel)));
             else
                 sb.Append("    deactivate ").AppendLine(sequence.RootParticipantId);
 
@@ -766,7 +768,7 @@ public sealed class MermaidSequenceSerializer
             sb.Append("    ").Append(from).Append("->>+").Append(to).Append(": ").AppendLine(label);
             foreach (var nested in call.NestedCalls)
                 EmitCall(sb, nested, stackedActivationBars);
-            sb.Append("    ").Append(to).Append("-->>-").Append(from).AppendLine(": ");
+            sb.Append("    ").Append(to).Append("-->>-").Append(from).Append(": ").AppendLine(EscapeLabel(BuildReturnLabel(call.MessageLabel, call.ReturnTypeLabel)));
         }
         else
         {
@@ -775,6 +777,12 @@ public sealed class MermaidSequenceSerializer
                 EmitCall(sb, nested, stackedActivationBars);
         }
     }
+
+    // Labels a return arrow with which call is returning and, when known, its declared return
+    // type — e.g. "BigEntry returns int" — so the return stays identifiable even when it lands
+    // far from its opening arrow (a different split part, or just many lines further down).
+    private static string BuildReturnLabel(string callLabel, string returnTypeLabel)
+        => string.IsNullOrEmpty(returnTypeLabel) ? callLabel : callLabel + " returns " + returnTypeLabel;
 
     // ── Multi-diagram HTML ────────────────────────────────────────────────────
 

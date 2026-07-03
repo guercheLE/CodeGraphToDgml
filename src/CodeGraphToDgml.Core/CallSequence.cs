@@ -8,7 +8,8 @@ public sealed record CallSequenceCallNode(
     string CallerParticipantId,
     string CalleeParticipantId,
     string MessageLabel,
-    IReadOnlyList<CallSequenceCallNode> NestedCalls);
+    IReadOnlyList<CallSequenceCallNode> NestedCalls,
+    string ReturnTypeLabel = "");
 
 public sealed class CallSequence
 {
@@ -31,4 +32,12 @@ public sealed class CallSequence
     /// the message label on the synthetic «Caller» actor's call into the entry method.
     /// </summary>
     public string RootMethodLabel { get; init; } = string.Empty;
+
+    /// <summary>
+    /// The root/entry method's declared return type (e.g. "int", "bool"), rendered on its return
+    /// arrow alongside <see cref="RootMethodLabel"/> so the return is identifiable even when it
+    /// lands far from its activation (e.g. the last part of a multi-part split). Empty for void
+    /// methods or when unknown.
+    /// </summary>
+    public string RootReturnTypeLabel { get; init; } = string.Empty;
 }

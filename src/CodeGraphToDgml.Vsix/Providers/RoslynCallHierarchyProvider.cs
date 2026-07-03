@@ -677,6 +677,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             RootCalls = rootCalls,
             RootParticipantId = rootParticipantId,
             RootMethodLabel = GetNodeLabel(rootSymbol),
+            RootReturnTypeLabel = GetReturnTypeLabel(rootSymbol),
         };
 
         async Task<IReadOnlyList<CallSequenceCallNode>> BuildCallsAsync(
@@ -703,6 +704,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             var ownNestedOf = new Dictionary<ISymbol, IReadOnlyList<CallSequenceCallNode>>(SymbolEqualityComparer.Default);
             var participantOf = new Dictionary<ISymbol, string>(SymbolEqualityComparer.Default);
             var labelOf = new Dictionary<ISymbol, string>(SymbolEqualityComparer.Default);
+            var returnTypeLabelOf = new Dictionary<ISymbol, string>(SymbolEqualityComparer.Default);
             var fluentReceiverOf = new Dictionary<ISymbol, ISymbol>(SymbolEqualityComparer.Default);
 
             foreach (var calleeInfo in callees)
@@ -739,6 +741,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 ownNestedOf[normalized] = nested;
                 participantOf[normalized] = calleeParticipantId;
                 labelOf[normalized] = GetNodeLabel(normalized);
+                returnTypeLabelOf[normalized] = GetReturnTypeLabel(normalized);
 
                 if (calleeInfo.FluentReceiver is { } receiver)
                 {
@@ -769,7 +772,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                     }
                 }
 
-                var node = new CallSequenceCallNode(effectiveCallerParticipantId, participantId, labelOf[symbol], ownNested);
+                var node = new CallSequenceCallNode(effectiveCallerParticipantId, participantId, labelOf[symbol], ownNested, returnTypeLabelOf[symbol]);
                 finalized[symbol] = node;
                 return node;
             }
@@ -816,7 +819,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 else
                     implBody = [];
 
-                dispatchNodes.Add(new CallSequenceCallNode(interfaceParticipantId, implParticipantId, GetNodeLabel(normImpl), implBody));
+                dispatchNodes.Add(new CallSequenceCallNode(interfaceParticipantId, implParticipantId, GetNodeLabel(normImpl), implBody, GetReturnTypeLabel(normImpl)));
             }
 
             return dispatchNodes;

@@ -131,6 +131,105 @@ public sealed class MermaidSequenceSerializerTests
         Assert.DoesNotContain("-->>-", result, "No deactivation markers when stacked bars off");
     }
 
+    // ──────────────────────────────────────────────────────────────────────────
+    // Return arrow labels
+    // ──────────────────────────────────────────────────────────────────────────
+
+    [TestMethod]
+    public void Serialize_ReturnArrow_NoReturnType_LabeledWithCallNameOnly()
+    {
+        var sequence = new CallSequence
+        {
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", "Foo")],
+        };
+
+        var result = Serializer.Serialize(sequence, stackedActivationBars: true);
+        Assert.Contains("B-->>-A: Foo", result);
+    }
+
+    [TestMethod]
+    public void Serialize_ReturnArrow_WithReturnType_LabeledWithNameAndType()
+    {
+        var sequence = new CallSequence
+        {
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [new CallSequenceCallNode("A", "B", "Foo", [], "int")],
+        };
+
+        var result = Serializer.Serialize(sequence, stackedActivationBars: true);
+        Assert.Contains("B-->>-A: Foo returns int", result);
+    }
+
+    [TestMethod]
+    public void Serialize_ReturnArrow_VoidReturnType_OmitsReturnsClause()
+    {
+        // An empty ReturnTypeLabel (the default for void/unknown) must not render "returns "
+        // with nothing after it — just the call name, same as the no-type case.
+        var sequence = new CallSequence
+        {
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [new CallSequenceCallNode("A", "B", "Foo", [], "")],
+        };
+
+        var result = Serializer.Serialize(sequence, stackedActivationBars: true);
+        Assert.Contains("B-->>-A: Foo", result);
+        Assert.DoesNotContain("returns", result);
+    }
+
+    [TestMethod]
+    public void Serialize_StackedBarsOff_NoReturnArrow_ReturnLabelNotEmitted()
+    {
+        var sequence = new CallSequence
+        {
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [new CallSequenceCallNode("A", "B", "Foo", [], "int")],
+        };
+
+        var result = Serializer.Serialize(sequence, stackedActivationBars: false);
+        Assert.DoesNotContain("returns", result, "No return arrow at all when stacked bars are off, so no return label either");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_RootWrap_ReturnArrowLabeledWithRootMethodAndReturnType()
+    {
+        var sequence = new CallSequence
+        {
+            Participants = [P("A", "A"), P("B", "B")],
+            RootCalls = [Leaf("A", "B", "Foo")],
+            RootParticipantId = "A",
+            RootMethodLabel = "btnGo_Click",
+            RootReturnTypeLabel = "bool",
+        };
+
+        var result = Serializer.BuildMarkdown(sequence, stackedActivationBars: true, autoNumber: false);
+        Assert.Contains("A-->>-Caller: btnGo_Click returns bool", result);
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_SplitParentFrame_LastSubPartReturnLabeledWithCallNameAndReturnType()
+    {
+        var seq = OversizedSingleCallSequence();
+        var typedRoot = new CallSequenceCallNode(
+            seq.RootCalls[0].CallerParticipantId,
+            seq.RootCalls[0].CalleeParticipantId,
+            seq.RootCalls[0].MessageLabel,
+            seq.RootCalls[0].NestedCalls,
+            "int");
+        var typedSequence = new CallSequence
+        {
+            Title = seq.Title,
+            Participants = seq.Participants,
+            RootCalls = [typedRoot],
+        };
+
+        var result = Serializer.BuildMarkdown(typedSequence,
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 4);
+
+        var sections = result.Split(new[] { "## Part" }, StringSplitOptions.None);
+        Assert.Contains("B-->>-A: BigEntry returns int", sections[^1]);
+    }
+
     [TestMethod]
     public void Serialize_SelfCall_SameParticipantBothEnds()
     {
