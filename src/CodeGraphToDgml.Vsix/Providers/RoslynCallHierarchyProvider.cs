@@ -12,6 +12,7 @@ using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.VisualStudio.ComponentModelHost;
 using RoslynDocument = Microsoft.CodeAnalysis.Document;
 using RoslynSolution = Microsoft.CodeAnalysis.Solution;
+using static CodeGraphToDgml.Vsix.Providers.RoslynGraphHelpers;
 
 namespace CodeGraphToDgml.Vsix.Providers;
 
@@ -442,102 +443,9 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
     // now live in CodeGraphToDgml.Roslyn.CallGraphSyntaxWalker, which has no VS SDK dependency and
     // is exercised directly by Roslyn-backed unit tests.
 
-    private static void AddNodeAndContainers(TraversalGraph graph, ISymbol symbol, string? projectName, RoslynSolution? solution = null)
-    {
-        var node = CreateNode(symbol, projectName);
-        if (graph.ContainsNode(node.Id)) return;
-        graph.UpsertNode(node);
-
-        var currentId = node.Id;
-        var currentContainer = symbol.ContainingSymbol;
-
-        while (currentContainer != null)
-        {
-            if (currentContainer is INamespaceSymbol ns && ns.IsGlobalNamespace)
-            {
-                if (solution != null && projectName != null && currentId == node.Id)
-                {
-                    var proj = solution.Projects.FirstOrDefault(p => p.AssemblyName == projectName);
-                    if (proj != null && !string.IsNullOrWhiteSpace(proj.DefaultNamespace))
-                    {
-                        var defaultNsId = $"Project={projectName}|N:{proj.DefaultNamespace}";
-                        if (defaultNsId != currentId)
-                        {
-                            var defaultNsNode = new GraphNode(
-                                defaultNsId,
-                                proj.DefaultNamespace!,
-                                "CodeSchema_Namespace",
-                                null,
-                                null,
-                                null);
-
-                            graph.UpsertNode(defaultNsNode);
-                            graph.AddLink(new GraphLink(defaultNsNode.Id, currentId, "Contains"));
-                            currentId = defaultNsId;
-                        }
-                    }
-                }
-                break;
-            }
-
-            var containerNode = CreateContainerNode(currentContainer, projectName);
-            graph.UpsertNode(containerNode);
-            graph.AddLink(new GraphLink(containerNode.Id, currentId, "Contains"));
-
-            currentId = containerNode.Id;
-            currentContainer = currentContainer.ContainingSymbol;
-        }
-
-        if (!string.IsNullOrWhiteSpace(projectName))
-        {
-            var projectId = $"Project={projectName}";
-            var projectNode = new GraphNode(
-                projectId,
-                projectName!,
-                "CodeSchema_Assembly",
-                null,
-                null,
-                projectName);
-
-            graph.UpsertNode(projectNode);
-            graph.AddLink(new GraphLink(projectId, currentId, "Contains"));
-
-            if (!symbol.Locations.Any(l => l.IsInSource))
-            {
-                const string externalGroupId = "ExternalSymbols";
-                graph.UpsertNode(new GraphNode(externalGroupId, "External Symbols", "Externals", null, null, null));
-                graph.AddLink(new GraphLink(externalGroupId, projectId, "Contains"));
-            }
-        }
-    }
-
-    private static GraphNode CreateContainerNode(ISymbol container, string? projectName)
-    {
-        var category = GetCategory(container);
-
-        var id = GetStableId(container);
-        if ((container is INamespaceSymbol || container is INamedTypeSymbol) && !string.IsNullOrWhiteSpace(projectName))
-        {
-            id = $"Project={projectName}|{id}";
-        }
-
-        var label = container is INamespaceSymbol ns
-            ? ns.ToDisplayString()
-            : container.Name;
-
-        var (filePath, lineNumber) = GetDeclarationLocation(container);
-
-        return new GraphNode(
-            id,
-            label,
-            category,
-            filePath,
-            lineNumber,
-            null)
-        {
-            Description = container.ToDisplayString(),
-        };
-    }
+    // AddNodeAndContainers and CreateContainerNode now live in RoslynGraphHelpers, shared with
+    // RoslynReferencesProvider (see using static above), so both DGML paths build the same
+    // project/namespace/type containment chain from a single implementation.
 
     private static async Task<ISymbol?> ResolveSymbolAsync(
         RoslynDocument document,
@@ -636,132 +544,8 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
     // IsIncludedByKind, and IsGenerated now live in CodeGraphToDgml.Roslyn.CallGraphFilters
     // (which also carries the item-4 well-known-framework-method whitelist carve-out).
 
-    private static GraphNode CreateNode(ISymbol symbol, string? projectName = null)
-    {
-        var (filePath, lineNumber) = GetDeclarationLocation(symbol);
-
-        return new GraphNode(
-            GetProjectScopedId(symbol, projectName),
-            GetNodeLabel(symbol),
-            GetCategory(symbol),
-            filePath,
-            lineNumber,
-            symbol.ContainingAssembly?.Name)
-        {
-            Description = symbol.ToDisplayString(),
-        };
-    }
-
-    private static string GetNodeLabel(ISymbol symbol)
-    {
-        if (symbol is IMethodSymbol method && method.MethodKind == MethodKind.Constructor)
-        {
-            return symbol.ContainingType?.Name ?? symbol.Name;
-        }
-
-        var name = symbol.Name;
-
-        // Explicit interface implementations in C# include the interface name as a qualifier
-        // (e.g. "IFoo.Bar"). Strip the qualifier so the label shows only the member name.
-        var lastDot = name.LastIndexOf('.');
-        if (lastDot >= 0 && lastDot < name.Length - 1)
-        {
-            name = name.Substring(lastDot + 1);
-        }
-
-        // Guard against synthesised or metadata symbols that have an empty Name.
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            name = symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
-        }
-
-        return name;
-    }
-
-    /// <summary>
-    /// Returns the source file path and 1-based line number of a symbol's declaration identifier.
-    /// Prefers <see cref="ISymbol.Locations"/> (which Roslyn sets to the identifier token for
-    /// named source symbols) and falls back to scanning the declaring syntax node's child tokens
-    /// for the name token, then to the declaring syntax node's own start position.
-    /// </summary>
-    private static (string? FilePath, int? Line) GetDeclarationLocation(ISymbol symbol)
-    {
-        // Roslyn sets Locations[0] to the identifier token for most named source symbols.
-        var inSourceLocation = symbol.Locations.FirstOrDefault(l => l.IsInSource);
-        if (inSourceLocation is not null)
-        {
-            var span = inSourceLocation.GetLineSpan();
-            return (span.Path, span.StartLinePosition.Line + 1);
-        }
-
-        // For metadata-only symbols, DeclaringSyntaxReferences is empty – nothing to fall back to.
-        if (symbol.DeclaringSyntaxReferences.Length == 0)
-        {
-            return (null, null);
-        }
-
-        // Fallback: scan the declaring syntax node for the child token matching the symbol name.
-        // This pinpoints the identifier precisely rather than using the full declaration span.
-        var syntaxNode = symbol.DeclaringSyntaxReferences[0].GetSyntax();
-        if (!string.IsNullOrEmpty(symbol.Name))
-        {
-            foreach (var token in syntaxNode.ChildTokens())
-            {
-                if (!token.IsMissing && token.ValueText == symbol.Name)
-                {
-                    var tokenSpan = token.GetLocation().GetLineSpan();
-                    return (tokenSpan.Path, tokenSpan.StartLinePosition.Line + 1);
-                }
-            }
-        }
-
-        // Last resort: use the start of the declaring syntax node.
-        var nodeSpan = syntaxNode.GetLocation().GetLineSpan();
-        return (nodeSpan.Path, nodeSpan.StartLinePosition.Line + 1);
-    }
-
-    private static string GetCategory(ISymbol symbol)
-    {
-        return symbol.Kind switch
-        {
-            SymbolKind.NamedType => GetContainerCategory((INamedTypeSymbol)symbol),
-            SymbolKind.Namespace => "CodeSchema_Namespace",
-            SymbolKind.Property => "CodeSchema_Property",
-            SymbolKind.Event => "CodeSchema_Event",
-            SymbolKind.Method => "CodeSchema_Method",
-            SymbolKind.Field => "CodeSchema_Field",
-            _ => "Group",
-        };
-    }
-
-    private static string GetContainerCategory(INamedTypeSymbol container)
-    {
-        return container.TypeKind switch
-        {
-            TypeKind.Interface => "CodeSchema_Interface",
-            TypeKind.Struct => "CodeSchema_Struct",
-            TypeKind.Enum => "CodeSchema_Enum",
-            TypeKind.Delegate => "CodeSchema_Delegate",
-            _ => "CodeSchema_Class"
-        };
-    }
-
-    private static string GetStableId(ISymbol symbol)
-    {
-        return symbol.GetDocumentationCommentId()
-            ?? symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-    }
-
-    private static string GetProjectScopedId(ISymbol symbol, string? projectName)
-    {
-        var id = GetStableId(symbol);
-        if (!string.IsNullOrWhiteSpace(projectName))
-        {
-            id = $"Project={projectName}|{id}";
-        }
-
-        return id;
-    }
+    // CreateNode, GetNodeLabel, GetDeclarationLocation, GetCategory, GetContainerCategory,
+    // GetStableId, and GetProjectScopedId now live in RoslynGraphHelpers (see using static above).
 
     private async Task<Workspace?> GetWorkspaceAsync(CancellationToken cancellationToken)
     {

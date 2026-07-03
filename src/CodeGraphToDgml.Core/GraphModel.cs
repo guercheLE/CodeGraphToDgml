@@ -91,16 +91,6 @@ public sealed class TraversalGraph
         return _nodes.ContainsKey(id);
     }
 
-    public bool RemoveNode(string id)
-    {
-        return _nodes.Remove(id);
-    }
-
-    public bool RemoveLink(GraphLink link)
-    {
-        return _links.Remove(link);
-    }
-
     public void FlattenSingleChildNamespaces()
     {
         while (TryFlattenSingleNamespace())

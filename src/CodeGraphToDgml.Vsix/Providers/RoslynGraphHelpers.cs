@@ -229,7 +229,7 @@ internal static class RoslynGraphHelpers
     /// named source symbols) and falls back to scanning the declaring syntax node's child tokens
     /// for the name token, then to the declaring syntax node's own start position.
     /// </summary>
-    private static (string? FilePath, int? Line) GetDeclarationLocation(ISymbol symbol)
+    internal static (string? FilePath, int? Line) GetDeclarationLocation(ISymbol symbol)
     {
         // Roslyn sets Locations[0] to the identifier token for most named source symbols.
         var inSourceLocation = symbol.Locations.FirstOrDefault(l => l.IsInSource);

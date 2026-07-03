@@ -1,4 +1,3 @@
-using System.Linq;
 using CodeGraphToDgml.Core;
 using CodeGraphToDgml.Vsix.Providers;
 using EnvDTE;
@@ -51,7 +50,8 @@ internal sealed class AllReferencesToDgmlOperationService
             {
                 await _outputWindowLogger.WriteLineAsync("No supported symbol was found at the caret.").ConfigureAwait(true);
                 await progress.FailAsync("Code Graph to DGML: no supported symbol at the caret.").ConfigureAwait(true);
-                await ShowMessageAsync(
+                await VsMessageBoxHelper.ShowAsync(
+                    _package,
                     "Place the caret on a C# or Visual Basic type or member (class, struct, interface, record, method, property, event, or field) and try again.",
                     OLEMSGICON.OLEMSGICON_INFO).ConfigureAwait(true);
                 return;
@@ -63,7 +63,7 @@ internal sealed class AllReferencesToDgmlOperationService
             }
 
             progress.ReportStatus("Code Graph to DGML: choosing DGML target...");
-            var targetDocument = await SelectTargetDocumentAsync(options, progress.Token).ConfigureAwait(true);
+            var targetDocument = await _dgmlDocumentService.SelectTargetDocumentAsync(options, progress.Token).ConfigureAwait(true);
 
             progress.ReportStatus("Code Graph to DGML: finding references...");
             var graph = await _provider.FindReferencesAsync(
@@ -123,58 +123,7 @@ internal sealed class AllReferencesToDgmlOperationService
             ActivityLog.TryLogError(nameof(AllReferencesToDgmlOperationService), $"Unhandled error: {ex}");
             await _outputWindowLogger.WriteLineAsync($"Unhandled error: {ex}").ConfigureAwait(true);
             await progress.FailAsync("Code Graph to DGML: failed.").ConfigureAwait(true);
-            await ShowMessageAsync(ex.Message, OLEMSGICON.OLEMSGICON_CRITICAL).ConfigureAwait(true);
+            await VsMessageBoxHelper.ShowAsync(_package, ex.Message, OLEMSGICON.OLEMSGICON_CRITICAL).ConfigureAwait(true);
         }
-    }
-
-    private async Task<DgmlDocumentSession> SelectTargetDocumentAsync(General options, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var openDocuments = await _dgmlDocumentService.GetOpenDgmlDocumentsAsync().ConfigureAwait(true);
-
-        if (openDocuments.Count == 0 || options.OpenBehavior == DgmlDocumentOpenBehavior.AlwaysCreateNewTemporary)
-        {
-            return await _dgmlDocumentService.OpenOrCreateTemporaryDocumentAsync().ConfigureAwait(true);
-        }
-
-        if (options.OpenBehavior == DgmlDocumentOpenBehavior.ReuseActiveIfOpen)
-        {
-            var activePath = await _dgmlDocumentService.GetActiveDgmlDocumentPathAsync().ConfigureAwait(true);
-            var selectedPath = activePath ?? openDocuments.Select(document => document.FullPath).First();
-            return await _dgmlDocumentService.OpenDocumentSessionAsync(selectedPath).ConfigureAwait(true);
-        }
-
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
-
-        var picker = new DgmlDocumentPickerWindow(openDocuments.Select(document => document.FullPath).ToArray());
-        if (picker.ShowDialog() != true)
-        {
-            throw new OperationCanceledException();
-        }
-
-        if (picker.CreateNew)
-        {
-            return await _dgmlDocumentService.OpenOrCreateTemporaryDocumentAsync().ConfigureAwait(true);
-        }
-
-        if (string.IsNullOrWhiteSpace(picker.SelectedExistingDocument))
-        {
-            throw new OperationCanceledException();
-        }
-
-        return await _dgmlDocumentService.OpenDocumentSessionAsync(picker.SelectedExistingDocument!).ConfigureAwait(true);
-    }
-
-    private async Task ShowMessageAsync(string message, OLEMSGICON icon)
-    {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-        VsShellUtilities.ShowMessageBox(
-            _package,
-            message,
-            Vsix.Name,
-            icon,
-            OLEMSGBUTTON.OLEMSGBUTTON_OK,
-            OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
     }
 }

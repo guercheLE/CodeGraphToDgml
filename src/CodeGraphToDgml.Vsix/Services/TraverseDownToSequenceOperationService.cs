@@ -48,7 +48,8 @@ internal sealed class TraverseDownToSequenceOperationService
             {
                 await _outputWindowLogger.WriteLineAsync("No supported symbol was found at the caret.").ConfigureAwait(true);
                 await progress.FailAsync("Code Graph to Sequence: no supported symbol at the caret.").ConfigureAwait(true);
-                await ShowMessageAsync(
+                await VsMessageBoxHelper.ShowAsync(
+                    _package,
                     "Place the caret on a C# or Visual Basic method, property, or event and try again.",
                     OLEMSGICON.OLEMSGICON_INFO).ConfigureAwait(true);
                 return;
@@ -146,7 +147,7 @@ internal sealed class TraverseDownToSequenceOperationService
             ActivityLog.TryLogError(nameof(TraverseDownToSequenceOperationService), $"Unhandled error: {ex}");
             await _outputWindowLogger.WriteLineAsync($"Unhandled error: {ex}").ConfigureAwait(true);
             await progress.FailAsync("Code Graph to Sequence: failed.").ConfigureAwait(true);
-            await ShowMessageAsync(ex.Message, OLEMSGICON.OLEMSGICON_CRITICAL).ConfigureAwait(true);
+            await VsMessageBoxHelper.ShowAsync(_package, ex.Message, OLEMSGICON.OLEMSGICON_CRITICAL).ConfigureAwait(true);
         }
     }
 
@@ -164,18 +165,5 @@ internal sealed class TraverseDownToSequenceOperationService
         {
             ActivityLog.TryLogError(nameof(TraverseDownToSequenceOperationService), $"Failed to open browser: {ex}");
         }
-    }
-
-    private async Task ShowMessageAsync(string message, OLEMSGICON icon)
-    {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-        VsShellUtilities.ShowMessageBox(
-            _package,
-            message,
-            Vsix.Name,
-            icon,
-            OLEMSGBUTTON.OLEMSGBUTTON_OK,
-            OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
     }
 }

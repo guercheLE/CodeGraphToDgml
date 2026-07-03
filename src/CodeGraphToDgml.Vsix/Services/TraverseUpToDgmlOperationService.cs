@@ -1,4 +1,3 @@
-using System.Linq;
 using CodeGraphToDgml.Core;
 using CodeGraphToDgml.Vsix.Providers;
 using EnvDTE;
@@ -51,7 +50,8 @@ internal sealed class TraverseUpToDgmlOperationService
             {
                 await _outputWindowLogger.WriteLineAsync("No supported symbol was found at the caret.").ConfigureAwait(true);
                 await progress.FailAsync("Code Graph to DGML: no supported symbol at the caret.").ConfigureAwait(true);
-                await ShowMessageAsync(
+                await VsMessageBoxHelper.ShowAsync(
+                    _package,
                     "Place the caret on a C# or Visual Basic method, property, or event and try again.",
                     OLEMSGICON.OLEMSGICON_INFO).ConfigureAwait(true);
                 return;
@@ -63,7 +63,7 @@ internal sealed class TraverseUpToDgmlOperationService
             }
 
             progress.ReportStatus("Code Graph to DGML: choosing DGML target...");
-            var targetDocument = await SelectTargetDocumentAsync(options, progress.Token).ConfigureAwait(true);
+            var targetDocument = await _dgmlDocumentService.SelectTargetDocumentAsync(options, progress.Token).ConfigureAwait(true);
 
             progress.ReportStatus("Code Graph to DGML: traversing callers...");
             var graph = await resolution.Value.Provider.TraverseUpAsync(
@@ -114,58 +114,7 @@ internal sealed class TraverseUpToDgmlOperationService
             ActivityLog.TryLogError(nameof(TraverseUpToDgmlOperationService), $"Unhandled error: {ex}");
             await _outputWindowLogger.WriteLineAsync($"Unhandled error: {ex}").ConfigureAwait(true);
             await progress.FailAsync("Code Graph to DGML: failed.").ConfigureAwait(true);
-            await ShowMessageAsync(ex.Message, OLEMSGICON.OLEMSGICON_CRITICAL).ConfigureAwait(true);
+            await VsMessageBoxHelper.ShowAsync(_package, ex.Message, OLEMSGICON.OLEMSGICON_CRITICAL).ConfigureAwait(true);
         }
-    }
-
-    private async Task<DgmlDocumentSession> SelectTargetDocumentAsync(General options, CancellationToken cancellationToken)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var openDocuments = await _dgmlDocumentService.GetOpenDgmlDocumentsAsync().ConfigureAwait(true);
-
-        if (openDocuments.Count == 0 || options.OpenBehavior == DgmlDocumentOpenBehavior.AlwaysCreateNewTemporary)
-        {
-            return await _dgmlDocumentService.OpenOrCreateTemporaryDocumentAsync().ConfigureAwait(true);
-        }
-
-        if (options.OpenBehavior == DgmlDocumentOpenBehavior.ReuseActiveIfOpen)
-        {
-            var activePath = await _dgmlDocumentService.GetActiveDgmlDocumentPathAsync().ConfigureAwait(true);
-            var selectedPath = activePath ?? openDocuments.Select(document => document.FullPath).First();
-            return await _dgmlDocumentService.OpenDocumentSessionAsync(selectedPath).ConfigureAwait(true);
-        }
-
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
-
-        var picker = new DgmlDocumentPickerWindow(openDocuments.Select(document => document.FullPath).ToArray());
-        if (picker.ShowDialog() != true)
-        {
-            throw new OperationCanceledException();
-        }
-
-        if (picker.CreateNew)
-        {
-            return await _dgmlDocumentService.OpenOrCreateTemporaryDocumentAsync().ConfigureAwait(true);
-        }
-
-        if (string.IsNullOrWhiteSpace(picker.SelectedExistingDocument))
-        {
-            throw new OperationCanceledException();
-        }
-
-        return await _dgmlDocumentService.OpenDocumentSessionAsync(picker.SelectedExistingDocument!).ConfigureAwait(true);
-    }
-
-    private async Task ShowMessageAsync(string message, OLEMSGICON icon)
-    {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-
-        VsShellUtilities.ShowMessageBox(
-            _package,
-            message,
-            Vsix.Name,
-            icon,
-            OLEMSGBUTTON.OLEMSGBUTTON_OK,
-            OLEMSGDEFBUTTON.OLEMSGDEFBUTTON_FIRST);
     }
 }

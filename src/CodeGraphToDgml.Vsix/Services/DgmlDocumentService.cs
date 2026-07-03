@@ -103,6 +103,44 @@ internal sealed class DgmlDocumentService
         return new DgmlDocumentSession(_package, fullPath, windowFrame, textLines, invisibleEditor);
     }
 
+    public async Task<DgmlDocumentSession> SelectTargetDocumentAsync(General options, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var openDocuments = await GetOpenDgmlDocumentsAsync().ConfigureAwait(true);
+
+        if (openDocuments.Count == 0 || options.OpenBehavior == DgmlDocumentOpenBehavior.AlwaysCreateNewTemporary)
+        {
+            return await OpenOrCreateTemporaryDocumentAsync().ConfigureAwait(true);
+        }
+
+        if (options.OpenBehavior == DgmlDocumentOpenBehavior.ReuseActiveIfOpen)
+        {
+            var activePath = await GetActiveDgmlDocumentPathAsync().ConfigureAwait(true);
+            var selectedPath = activePath ?? openDocuments.Select(document => document.FullPath).First();
+            return await OpenDocumentSessionAsync(selectedPath).ConfigureAwait(true);
+        }
+
+        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(cancellationToken);
+
+        var picker = new DgmlDocumentPickerWindow(openDocuments.Select(document => document.FullPath).ToArray());
+        if (picker.ShowDialog() != true)
+        {
+            throw new OperationCanceledException();
+        }
+
+        if (picker.CreateNew)
+        {
+            return await OpenOrCreateTemporaryDocumentAsync().ConfigureAwait(true);
+        }
+
+        if (string.IsNullOrWhiteSpace(picker.SelectedExistingDocument))
+        {
+            throw new OperationCanceledException();
+        }
+
+        return await OpenDocumentSessionAsync(picker.SelectedExistingDocument!).ConfigureAwait(true);
+    }
+
     private async Task<(IVsTextLines?, IVsInvisibleEditor?)> GetTextLinesAsync(string fullPath)
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
