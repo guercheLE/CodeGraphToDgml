@@ -359,6 +359,13 @@ public sealed class MermaidSequenceSerializer
             phaseNumber++;
         }
 
+        // Every non-first segment emits "activate <root>" to keep the «Caller» wrap's bar
+        // alive, so the root participant must be declared in every segment — deep sub-part
+        // recursion rebuilds participant sets from its own boundary and can drop it.
+        foreach (var plan in allPlans)
+            foreach (var rb in rootBoundary)
+                AddIfMissing(plan.ParticipantIds, rb);
+
         // Compute boundary participants (participants shared between adjacent segments)
         for (int i = 1; i < allPlans.Count; i++)
         {
@@ -470,6 +477,14 @@ public sealed class MermaidSequenceSerializer
                 IsFirstSubPart = i == 0,
                 IsLastSubPart = i == leaves.Count - 1,
             });
+
+            // This frame's caller/callee lifelines get activate/deactivate lines in every leaf,
+            // so they must be declared in every leaf. Deeper recursion levels rebuild each
+            // leaf's participant set from their own (innermost) boundary only, which drops the
+            // outer frames' participants — and Mermaid 11 throws (TypeError reading '.x')
+            // when asked to activate an actor the diagram never declared or messaged.
+            AddIfMissing(leaves[i].ParticipantIds, parentCall.CallerParticipantId);
+            AddIfMissing(leaves[i].ParticipantIds, parentCall.CalleeParticipantId);
         }
 
         return leaves;
@@ -647,6 +662,12 @@ public sealed class MermaidSequenceSerializer
     }
 
     // ── Participant helpers ───────────────────────────────────────────────────
+
+    private static void AddIfMissing(List<string> list, string id)
+    {
+        if (!list.Contains(id))
+            list.Add(id);
+    }
 
     private static HashSet<string> GetSubtreeParticipants(CallSequenceCallNode call)
     {

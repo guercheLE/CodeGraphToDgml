@@ -1291,6 +1291,89 @@ public sealed class MermaidSequenceSerializerTests
         }
     }
 
+    // Mermaid 11 throws "Cannot read properties of undefined (reading 'x')" when a diagram
+    // contains "activate X" for a participant it never declared and never messaged — it tries
+    // to look up the actor's layout position and finds nothing. Continuation sub-parts keep
+    // split-frame lifelines alive with bare activates, so every referenced participant must be
+    // explicitly declared in every part.
+    private static void AssertAllReferencedParticipantsDeclared(string diagram)
+    {
+        var declared = new HashSet<string>(StringComparer.Ordinal);
+        var referenced = new List<(string Id, string Line)>();
+
+        foreach (var raw in diagram.Split('\n'))
+        {
+            var line = raw.Trim();
+            if (line.StartsWith("participant ") || line.StartsWith("actor "))
+            {
+                var rest = line.Substring(line.IndexOf(' ') + 1);
+                int asIdx = rest.IndexOf(" as ", StringComparison.Ordinal);
+                declared.Add((asIdx >= 0 ? rest.Substring(0, asIdx) : rest).Trim());
+                continue;
+            }
+            if (line.StartsWith("activate ")) { referenced.Add((line.Substring("activate ".Length).Trim(), line)); continue; }
+            if (line.StartsWith("deactivate ")) { referenced.Add((line.Substring("deactivate ".Length).Trim(), line)); continue; }
+
+            int arrowIdx = line.IndexOf("-->>", StringComparison.Ordinal);
+            bool dashed = arrowIdx >= 0;
+            if (!dashed) arrowIdx = line.IndexOf("->>", StringComparison.Ordinal);
+            if (arrowIdx < 0) continue;
+
+            var sender = line.Substring(0, arrowIdx).Trim();
+            var receiverPart = line.Substring(arrowIdx + (dashed ? 4 : 3)).TrimStart('+', '-');
+            int colon = receiverPart.IndexOf(':');
+            var receiver = (colon >= 0 ? receiverPart.Substring(0, colon) : receiverPart).Trim();
+            referenced.Add((sender, line));
+            referenced.Add((receiver, line));
+        }
+
+        foreach (var (id, line) in referenced)
+            Assert.IsTrue(declared.Contains(id),
+                $"Participant '{id}' is referenced ('{line}') but never declared in:\n{diagram}");
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_SingleChildChain_EveryPartDeclaresAllReferencedParticipants()
+    {
+        // Continuation sub-parts keep the chained split frames (Handle, Execute, Run) alive via
+        // bare activates on A/B/C/D — all of which must be declared in those parts even though
+        // only D and E exchange real messages there.
+        var result = Serializer.BuildMarkdown(SingleChildChainSequence(),
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 0, maxMessagesPerDiagram: 12);
+
+        var blocks = ExtractMermaidBlocks(result);
+        Assert.IsGreaterThan(1, blocks.Count);
+        foreach (var block in blocks)
+            AssertAllReferencedParticipantsDeclared(block);
+    }
+
+    [TestMethod]
+    public void BuildMarkdown_SingleChildChainWithRoot_EveryPartDeclaresAllReferencedParticipants()
+    {
+        // With the «Caller» wrap, non-first segments also emit "activate A" for the root
+        // participant — the root must therefore be declared in every deep sub-part too.
+        var chain = SingleChildChainSequence();
+        var sequence = new CallSequence
+        {
+            Title = chain.Title,
+            Participants = chain.Participants,
+            RootCalls = chain.RootCalls,
+            RootParticipantId = "A",
+            RootMethodLabel = "Entry",
+        };
+
+        var result = Serializer.BuildMarkdown(sequence,
+            stackedActivationBars: true, autoNumber: false, maxParticipantsPerDiagram: 0, maxMessagesPerDiagram: 12);
+
+        var blocks = ExtractMermaidBlocks(result);
+        Assert.IsGreaterThan(1, blocks.Count);
+        foreach (var block in blocks)
+        {
+            AssertAllReferencedParticipantsDeclared(block);
+            AssertActivationsBalanced(block);
+        }
+    }
+
     // Greedy segmentation shape: a full first segment (cap-forced boundary), then a mid segment,
     // then a 1-call straggler cut off by the low-overlap seam. The straggler fits the caps when
     // merged into the mid segment, so the tiny-tail merge must reattach it.
