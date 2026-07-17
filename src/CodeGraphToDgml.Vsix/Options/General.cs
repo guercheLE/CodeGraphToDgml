@@ -143,8 +143,8 @@ internal class General : BaseOptionModel<General>
     [Category("Sequence Diagram")]
     [DisplayName("Max messages per diagram")]
     [Description("When greater than zero, sections are also split so each contains at most this many message arrows, independent of the participant cap. Set to 0 to disable message-based splitting.")]
-    [DefaultValue(100)]
-    public int SequenceDiagramMaxMessagesPerDiagram { get; set; } = 100;
+    [DefaultValue(60)]
+    public int SequenceDiagramMaxMessagesPerDiagram { get; set; } = 60;
 
     [Category("UI")]
     [DisplayName("Activate result document")]
