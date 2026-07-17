@@ -403,10 +403,12 @@ public sealed class MermaidSequenceSerializer
 
     // Recursively expands one phase (or one sub-part of an already-split call) into leaf
     // segments that each fit the caps. A phase can only still be oversized here because it's a
-    // single call whose own subtree exceeds the cap (SegmentCalls already keeps every multi-call
-    // group under it) — in that case, split that call's NestedCalls the same way, and recurse
+    // single call whose own subtree exceeds a cap (SegmentCalls already keeps every multi-call
+    // group under both) — in that case, split that call's NestedCalls the same way, and recurse
     // into each resulting piece so a sub-part that's itself oversized keeps splitting instead of
-    // being emitted as one big chunk.
+    // being emitted as one big chunk. Descent continues even when the nested calls form a single
+    // sub-phase (the controller→handler→ExecuteAsync shape, where each level has one dominant
+    // child), so a deep-but-narrow monolith still gets sliced at the level where siblings appear.
     private static List<SegmentPlan> ExpandPhase(
         List<CallSequenceCallNode> calls,
         HashSet<string> participants,
@@ -416,22 +418,22 @@ public sealed class MermaidSequenceSerializer
         int maxMessages,
         bool stackedBars)
     {
-        if (participants.Count <= maxParticipants || calls.Count != 1)
+        bool fits = participants.Count <= maxParticipants
+            && CountArrows(calls, stackedBars) <= maxMessages;
+        if (fits || calls.Count != 1)
             return [MakeLeafPlan(calls, participants, partNumber)];
 
         var parentCall = calls[0];
+        if (parentCall.NestedCalls.Count == 0)
+            return [MakeLeafPlan(calls, participants, partNumber)];
+
         var boundary = new HashSet<string>(StringComparer.Ordinal)
         {
             parentCall.CallerParticipantId,
             parentCall.CalleeParticipantId,
         };
 
-        var subPhases = parentCall.NestedCalls.Count == 0
-            ? [new List<CallSequenceCallNode>(calls)]
-            : SegmentCalls(parentCall.NestedCalls, boundary, maxParticipants, maxMessages, stackedBars);
-
-        if (subPhases.Count <= 1)
-            return [MakeLeafPlan(calls, participants, partNumber)];
+        var subPhases = SegmentCalls(parentCall.NestedCalls, boundary, maxParticipants, maxMessages, stackedBars);
 
         var leaves = new List<SegmentPlan>();
         for (int i = 0; i < subPhases.Count; i++)
@@ -440,10 +442,19 @@ public sealed class MermaidSequenceSerializer
             var subParts = GetCallListParticipants(subCalls);
             subParts.UnionWith(boundary);
 
-            var childPartNumber = ChildPartNumber(partNumber, i, depth);
-            leaves.AddRange(ExpandPhase(subCalls, subParts, childPartNumber, depth + 1,
+            // A lone sub-phase has no sibling to disambiguate from, so it inherits the parent's
+            // part number and depth unchanged (avoids a "Part 1A" with no 1B, and keeps the
+            // letter/digit suffix alternation tracking actual split levels, not descent levels).
+            var childPartNumber = subPhases.Count == 1 ? partNumber : ChildPartNumber(partNumber, i, depth);
+            var childDepth = subPhases.Count == 1 ? depth : depth + 1;
+            leaves.AddRange(ExpandPhase(subCalls, subParts, childPartNumber, childDepth,
                 maxParticipants, maxMessages, stackedBars));
         }
+
+        // Nothing actually split (however deep we descended, no divisible level was found) —
+        // emit the original call as one leaf rather than wrapping it in a pointless frame.
+        if (leaves.Count == 1)
+            return [MakeLeafPlan(calls, participants, partNumber)];
 
         // The parent call is "in flight" across every leaf produced above — the first leaf opens
         // it with the real arrow, the last leaf closes it, everything in between just keeps its
@@ -479,8 +490,22 @@ public sealed class MermaidSequenceSerializer
     // appends a letter again, and so on for arbitrarily deep recursion.
     private static string ChildPartNumber(string parentPartNumber, int index, int depth)
         => depth % 2 == 1
-            ? parentPartNumber + (char)('A' + index)
+            ? parentPartNumber + ToAlphaSuffix(index)
             : parentPartNumber + (index + 1).ToString();
+
+    // Excel-style letters: 0→A … 25→Z, 26→AA, 27→AB, … — an oversized call can produce well
+    // over 26 sub-parts now that the message cap is enforced inside a single call, and a plain
+    // ('A' + index) would walk off the alphabet into "Part 2[", "Part 2\".
+    private static string ToAlphaSuffix(int index)
+    {
+        var sb = new StringBuilder();
+        for (int i = index + 1; i > 0; i /= 26)
+        {
+            i--;
+            sb.Insert(0, (char)('A' + i % 26));
+        }
+        return sb.ToString();
+    }
 
     // Shared segmentation primitive used both for grouping top-level RootCalls into phases
     // (boundaryParticipants empty) and for splitting a single oversized call's NestedCalls into
@@ -523,7 +548,72 @@ public sealed class MermaidSequenceSerializer
         if (current.Count > 0)
             segments.Add(current);
 
+        MergeTinySegments(segments, boundaryParticipants, maxParticipants, maxMessages, stackedBars);
+
         return segments;
+    }
+
+    // Re-attaches "orphan" segments (a handful of messages stranded by a semantic seam or a
+    // cap-forced cut) to an adjacent segment when the merged result still respects both caps.
+    // Cap-forced boundaries survive automatically — merging across one would exceed a cap — so
+    // only soft seams get undone. Skipped when no message cap is configured, since "tiny" is
+    // defined relative to that cap.
+    private static void MergeTinySegments(
+        List<List<CallSequenceCallNode>> segments,
+        HashSet<string> boundaryParticipants,
+        int maxParticipants,
+        int maxMessages,
+        bool stackedBars)
+    {
+        if (segments.Count <= 1 || maxMessages == int.MaxValue)
+            return;
+
+        int tinyThreshold = Math.Max(2, maxMessages / 10);
+
+        int i = 0;
+        while (i < segments.Count && segments.Count > 1)
+        {
+            if (CountArrows(segments[i], stackedBars) >= tinyThreshold)
+            {
+                i++;
+                continue;
+            }
+
+            if (i > 0 && CanMergeSegments(segments[i - 1], segments[i], boundaryParticipants, maxParticipants, maxMessages, stackedBars))
+            {
+                segments[i - 1].AddRange(segments[i]);
+                segments.RemoveAt(i);
+                i--; // the merged segment could itself still be tiny — recheck it
+            }
+            else if (i < segments.Count - 1 && CanMergeSegments(segments[i], segments[i + 1], boundaryParticipants, maxParticipants, maxMessages, stackedBars))
+            {
+                segments[i].AddRange(segments[i + 1]);
+                segments.RemoveAt(i + 1);
+            }
+            else
+            {
+                i++;
+            }
+        }
+    }
+
+    private static bool CanMergeSegments(
+        List<CallSequenceCallNode> a,
+        List<CallSequenceCallNode> b,
+        HashSet<string> boundaryParticipants,
+        int maxParticipants,
+        int maxMessages,
+        bool stackedBars)
+    {
+        if (CountArrows(a, stackedBars) + CountArrows(b, stackedBars) > maxMessages)
+            return false;
+
+        var combined = new HashSet<string>(boundaryParticipants, StringComparer.Ordinal);
+        foreach (var call in a)
+            combined.UnionWith(GetSubtreeParticipants(call));
+        foreach (var call in b)
+            combined.UnionWith(GetSubtreeParticipants(call));
+        return combined.Count <= maxParticipants;
     }
 
     private static bool ShouldCutBefore(
