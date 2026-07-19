@@ -2,6 +2,10 @@
 
 Code Graph to DGML is a Visual Studio extension that builds DGML graphs from the symbol at the editor caret.
 
+[![Sponsor](https://img.shields.io/github/sponsors/guerchele?label=Sponsor&logo=github&color=EA4AAA)](https://github.com/sponsors/guerchele)
+
+Building and maintaining this took real ideation, time, design effort, and compute (including LLM usage) to get right. If it's useful to you, consider [sponsoring its development](https://github.com/sponsors/guerchele) — any amount helps keep it going. 💛
+
 ## Features
 
 ### Traverse Up to DGML
