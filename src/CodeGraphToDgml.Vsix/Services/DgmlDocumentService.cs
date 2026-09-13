@@ -96,6 +96,8 @@ internal sealed class DgmlDocumentService
     {
         await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
 
+        await DgmlEditorDetector.WarnIfMissingAsync(_package).ConfigureAwait(true);
+
         var windowFrame = OpenDocumentSafe(_package, fullPath);
         ErrorHandler.ThrowOnFailure(windowFrame.Show());
 

@@ -2,6 +2,8 @@
 
 Code Graph to DGML is a Visual Studio extension that builds DGML graphs from the symbol at the editor caret.
 
+[![Build](https://github.com/guercheLE/CodeGraphToDgml/actions/workflows/build.yml/badge.svg)](https://github.com/guercheLE/CodeGraphToDgml/actions/workflows/build.yml)
+[![Marketplace](https://img.shields.io/visual-studio-marketplace/v/guerchele.codegraphtodgml?label=Marketplace&logo=visualstudio)](https://marketplace.visualstudio.com/items?itemName=guerchele.codegraphtodgml)
 [![Sponsor](https://img.shields.io/github/sponsors/guerchele?label=Sponsor&logo=github&color=EA4AAA)](https://github.com/sponsors/guerchele)
 
 Building and maintaining this took real ideation, time, design effort, and compute (including LLM usage) to get right. If it's useful to you, consider [sponsoring its development](https://github.com/sponsors/guerchele) — any amount helps keep it going. 💛
@@ -67,6 +69,25 @@ dotnet build .\CodeGraphToDgml.sln -c Release
 The repository includes both `CodeGraphToDgml.sln` and `CodeGraphToDgml.slnx`.
 
 The generated VSIX is written to `src\CodeGraphToDgml.Vsix\bin\Release\net48\CodeGraphToDgml.Vsix.vsix`.
+
+All projects are SDK-style, including the VSIX project (`VSSDKBuildToolsAutoSetup`), and package versions are managed centrally in `Directory.Packages.props`.
+
+### Versioning
+
+The extension version lives in one place: `<Version>` in `Directory.Build.props`. The VSIX manifest resolves it at build time through the `|%CurrentProject%;GetVsixVersion|` placeholder, and `Vsix.Version` is generated into `obj\Vsix.Version.g.cs`. To release, bump that single value and tag the commit.
+
+## Release
+
+The [Build workflow](.github/workflows/build.yml) runs on every push and pull request (build, tests, VSIX artifact, and a check that the packaged manifest version equals `Directory.Build.props`). Pushing a tag `vX.Y.Z` additionally:
+
+1. verifies the tag matches `Directory.Build.props`,
+2. creates a GitHub release with the VSIX attached, and
+3. waits for approval on the `marketplace` environment, then publishes the VSIX to the Visual Studio Marketplace with `VsixPublisher.exe` using `publishManifest.json`.
+
+One-time setup on GitHub:
+
+- Create the `marketplace` environment (Settings > Environments) and add yourself as a required reviewer so publishing needs an explicit approval.
+- Add the secret `VS_MARKETPLACE_PAT` (Settings > Secrets and variables > Actions). Its value is an Azure DevOps personal access token: sign in at https://dev.azure.com, open User settings > Personal access tokens > New token, choose Organization "All accessible organizations", Scopes "Custom defined" with **Marketplace: Publish** (or Manage), and copy the token. The account must be a member of the `guerchele` publisher at https://marketplace.visualstudio.com/manage.
 
 ## Manual Test Matrix
 

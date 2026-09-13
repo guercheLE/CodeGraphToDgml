@@ -1,0 +1,128 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: microsoft/setup-msbuild@v2
+
+      - name: Restore
+        run: msbuild CodeGraphToDgml.sln /t:Restore /p:Configuration=Release /v:minimal
+
+      - name: Build (Release)
+        run: msbuild CodeGraphToDgml.sln /p:Configuration=Release /m /v:minimal
+
+      - name: Test
+        run: dotnet test tests/CodeGraphToDgml.Tests/CodeGraphToDgml.Tests.csproj -c Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: TestResults/*.trx
+
+      - name: Verify VSIX manifest version matches Directory.Build.props
+        shell: pwsh
+        run: |
+          $expected = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version
+          $vsix = Get-ChildItem src/CodeGraphToDgml.Vsix/bin/Release/net48/*.vsix | Select-Object -First 1
+          if (-not $vsix) { throw "No VSIX was produced." }
+          $tmp = Join-Path $env:RUNNER_TEMP "vsix-check"
+          Expand-Archive -Path $vsix.FullName -DestinationPath $tmp -Force
+          [xml]$manifest = Get-Content (Join-Path $tmp "extension.vsixmanifest")
+          $actual = $manifest.PackageManifest.Metadata.Identity.Version
+          Write-Host "Directory.Build.props: $expected / extension.vsixmanifest: $actual"
+          if ($actual -ne $expected) { throw "VSIX manifest version '$actual' does not match Directory.Build.props '$expected'." }
+          foreach ($asset in @("logo.png", "LICENSE.txt")) {
+            if (-not (Test-Path (Join-Path $tmp $asset))) { throw "Asset '$asset' is missing from the VSIX." }
+          }
+
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: src/CodeGraphToDgml.Vsix/bin/Release/net48/*.vsix
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches Directory.Build.props
+        run: |
+          expected="$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Directory.Build.props)"
+          tag="${GITHUB_REF_NAME#v}"
+          echo "tag=$tag props=$expected"
+          if [ "$tag" != "$expected" ]; then
+            echo "Tag v$tag does not match <Version>$expected</Version> in Directory.Build.props." >&2
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: vsix
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: vsix/*.vsix
+          generate_release_notes: true
+
+  publish:
+    name: Publish to Visual Studio Marketplace
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: windows-latest
+    # Configure this environment in the repository settings with a required reviewer so
+    # Marketplace publishing needs a manual approval after the GitHub release is created.
+    environment: marketplace
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: vsix
+          path: vsix
+
+      - name: Publish
+        shell: pwsh
+        env:
+          VS_MARKETPLACE_PAT: ${{ secrets.VS_MARKETPLACE_PAT }}
+        run: |
+          if (-not $env:VS_MARKETPLACE_PAT) { throw "The VS_MARKETPLACE_PAT secret is not set." }
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $publisher = & $vswhere -latest -prerelease -products * -requires Microsoft.VisualStudio.Component.VSSDK -find "VSSDK\VisualStudioIntegration\Tools\Bin\VsixPublisher.exe" | Select-Object -First 1
+          if (-not $publisher) { throw "VsixPublisher.exe was not found on this runner (Visual Studio SDK component missing)." }
+          $vsix = Get-ChildItem vsix/*.vsix | Select-Object -First 1
+          Write-Host "Publishing $($vsix.Name) with $publisher"
+          & $publisher publish -payload $vsix.FullName -publishManifest publishManifest.json -personalAccessToken $env:VS_MARKETPLACE_PAT
+          if ($LASTEXITCODE -ne 0) { throw "VsixPublisher exited with code $LASTEXITCODE." }

@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json.schemastore.org/vsix-publish",
+  "categories": [ "tools", "coding" ],
+  "identity": {
+    "internalName": "codegraphtodgml"
+  },
+  "overview": "README.md",
+  "priceCategory": "free",
+  "publisher": "guerchele",
+  "private": false,
+  "qna": true,
+  "repo": "https://github.com/guercheLE/CodeGraphToDgml"
+}

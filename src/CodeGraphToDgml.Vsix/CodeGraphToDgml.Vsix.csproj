@@ -17,12 +17,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Community.VisualStudio.Toolkit.17" Version="17.0.551" />
-    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.14.40265" ExcludeAssets="runtime" />
-    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="18.5.38461" />
-    <PackageReference Include="Microsoft.VsSDK.CompatibilityAnalyzer" Version="18.3.1108" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.3.0" />
-    <PackageReference Include="Microsoft.CodeAnalysis.VisualBasic.Workspaces" Version="5.3.0" />
+    <PackageReference Include="Community.VisualStudio.Toolkit.17" />
+    <PackageReference Include="Microsoft.VisualStudio.SDK" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" />
+    <PackageReference Include="Microsoft.VsSDK.CompatibilityAnalyzer" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+    <PackageReference Include="Microsoft.CodeAnalysis.VisualBasic.Workspaces" />
   </ItemGroup>
 
   <ItemGroup>
@@ -38,4 +38,35 @@
       <SubType>Designer</SubType>
     </None>
   </ItemGroup>
+
+  <!-- Marketplace assets referenced from source.extension.vsixmanifest (Icon, PreviewImage, License).
+       Linked from the repository root so there is a single copy of each file. -->
+  <ItemGroup>
+    <Content Include="..\..\logo.png" Link="logo.png" IncludeInVSIX="true" CopyToOutputDirectory="Never" />
+    <Content Include="..\..\LICENSE" Link="LICENSE.txt" IncludeInVSIX="true" CopyToOutputDirectory="Never" />
+  </ItemGroup>
+
+  <!--
+    Single source of truth for the extension version: $(Version) from Directory.Build.props.
+    1. The manifest's Identity Version is the placeholder |%CurrentProject%;GetVsixVersion|,
+       which the VSIX build resolves by calling this target.
+    2. Vsix.Version (used by [InstalledProductRegistration]) is generated below instead of being
+       hand-edited in source.extension.cs.
+  -->
+  <Target Name="GetVsixVersion" Outputs="$(Version)" />
+
+  <Target Name="GenerateVsixVersionSource" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <_VsixVersionSourceFile>$(IntermediateOutputPath)Vsix.Version.g.cs</_VsixVersionSourceFile>
+    </PropertyGroup>
+    <WriteLinesToFile
+      File="$(_VsixVersionSourceFile)"
+      Lines="// &lt;auto-generated /&gt; Generated from Directory.Build.props by GenerateVsixVersionSource. Do not edit.;namespace CodeGraphToDgml.Vsix%3B;;internal sealed partial class Vsix;{;    public const string Version = &quot;$(Version)&quot;%3B;}"
+      Overwrite="true"
+      WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Include="$(_VsixVersionSourceFile)" />
+      <FileWrites Include="$(_VsixVersionSourceFile)" />
+    </ItemGroup>
+  </Target>
 </Project>
