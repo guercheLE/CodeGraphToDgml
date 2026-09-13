@@ -39,7 +39,7 @@ jobs:
 
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results
           path: TestResults/*.trx
@@ -61,7 +61,7 @@ jobs:
           }
 
       - name: Upload VSIX
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vsix
           path: src/CodeGraphToDgml.Vsix/bin/Release/net48/*.vsix
