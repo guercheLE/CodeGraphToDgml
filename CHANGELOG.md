@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-13
+
 ### Fixed
 
 - Traverse Down and Traverse Down to Sequence Diagram now work for Visual Basic. The call-site walker was C#-only and silently returned no callees for VB members; a Visual Basic walker now mirrors every C# call shape, including parenless calls.
@@ -156,7 +158,8 @@ All notable changes to this project are documented here. The format follows
 
 - Initial release: "Traverse Up to DGML" and "All References to DGML" from the editor context menu, with append/replace into an existing DGML document.
 
-[Unreleased]: https://github.com/guercheLE/CodeGraphToDgml/compare/v0.13.2...HEAD
+[Unreleased]: https://github.com/guercheLE/CodeGraphToDgml/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/guercheLE/CodeGraphToDgml/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/guercheLE/CodeGraphToDgml/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/guercheLE/CodeGraphToDgml/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/guercheLE/CodeGraphToDgml/releases/tag/v0.13.0
