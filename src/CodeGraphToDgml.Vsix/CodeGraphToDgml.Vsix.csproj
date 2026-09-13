@@ -43,7 +43,7 @@
        Linked from the repository root so there is a single copy of each file. -->
   <ItemGroup>
     <Content Include="..\..\logo.png" Link="logo.png" IncludeInVSIX="true" CopyToOutputDirectory="Never" />
-    <Content Include="..\..\LICENSE" Link="LICENSE.txt" IncludeInVSIX="true" CopyToOutputDirectory="Never" />
+    <Content Include="..\..\LICENSE.txt" Link="LICENSE.txt" IncludeInVSIX="true" CopyToOutputDirectory="Never" />
   </ItemGroup>
 
   <!--
