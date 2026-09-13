@@ -25,7 +25,7 @@ public sealed class DgmlSerializerTests
             "CodeSchema_Struct", "CodeSchema_Enum", "CodeSchema_Delegate", "CodeSchema_Type",
             "CodeSchema_Method", "CodeSchema_Property", "CodeSchema_Event", "CodeSchema_Field",
             "CodeSchema_Calls", "CodeSchema_FunctionPointer",
-            "Implements", "Contains", "References", "InheritsFrom", "UsedBy", "Externals"
+            "Implements", "Contains", "References", "InheritsFrom", "Overrides", "UsedBy", "Externals"
         };
         CollectionAssert.AreEquivalent(
             expectedCategories,
@@ -156,6 +156,45 @@ public sealed class DgmlSerializerTests
 
         Assert.AreEqual("Collapsed", (string?)nsNode.Attribute("Group"));
         Assert.AreEqual("Collapsed", (string?)clsNode.Attribute("Group"));
+    }
+
+    [TestMethod]
+    public void CreateEmptyText_ContainsOverridesLinkStyle()
+    {
+        var serializer = new DgmlSerializer();
+        var document = XDocument.Parse(serializer.CreateEmptyText(), LoadOptions.PreserveWhitespace);
+
+        var overridesStyle = document.Root!
+            .Element(Namespace + "Styles")!
+            .Elements(Namespace + "Style")
+            .SingleOrDefault(s =>
+                (string?)s.Attribute("TargetType") == "Link"
+                && (string?)s.Element(Namespace + "Condition")?.Attribute("Expression") == "HasCategory('Overrides')");
+
+        Assert.IsNotNull(overridesStyle, "Overrides link style should be present");
+        var drawArrowSetter = overridesStyle.Elements(Namespace + "Setter")
+            .SingleOrDefault(s => (string?)s.Attribute("Property") == "DrawArrow");
+        Assert.AreEqual("true", (string?)drawArrowSetter?.Attribute("Value"));
+    }
+
+    [TestMethod]
+    public void Merge_AddsMissingStylesToExistingDocumentWithoutDuplicating()
+    {
+        var serializer = new DgmlSerializer();
+        var graph = new TraversalGraph();
+        graph.UpsertNode(new GraphNode("A", "Alpha", "CodeSchema_Method", null, null, null));
+
+        // A hand-written document with no <Styles> element at all.
+        const string existing = "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<DirectedGraph xmlns=\"http://schemas.microsoft.com/vs/2009/dgml\"><Nodes /><Links /></DirectedGraph>";
+
+        var first = serializer.Merge(existing, graph, replaceContents: false);
+        var firstStyles = XDocument.Parse(first).Root!.Element(Namespace + "Styles")!.Elements(Namespace + "Style").Count();
+        Assert.IsGreaterThan(0, firstStyles, "Merging into a document without <Styles> should add the schema styles");
+
+        var second = serializer.Merge(first, graph, replaceContents: false);
+        var secondStyles = XDocument.Parse(second).Root!.Element(Namespace + "Styles")!.Elements(Namespace + "Style").Count();
+        Assert.AreEqual(firstStyles, secondStyles, "A second merge must not duplicate styles");
     }
 
     [TestMethod]

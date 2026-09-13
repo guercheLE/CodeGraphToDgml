@@ -124,6 +124,12 @@ public sealed class DefaultDgmlSchemaProvider : IDgmlSchemaProvider
             IncomingActionLabel: "Inherited By",
             OutgoingActionLabel: "Inherits From");
 
+        yield return new CategoryDefinition("Overrides", "Overrides",
+            CanBeDataDriven: true,
+            CanLinkedNodesBeDataDriven: true,
+            IncomingActionLabel: "Overridden By",
+            OutgoingActionLabel: "Overrides");
+
         yield return new CategoryDefinition("UsedBy", "Used By",
             CanBeDataDriven: true,
             CanLinkedNodesBeDataDriven: true,
@@ -191,6 +197,7 @@ public sealed class DefaultDgmlSchemaProvider : IDgmlSchemaProvider
         yield return CreateNodeStyle(xmlNamespace, "Externals", "HasCategory('Externals')", "#FF424242", "#FFFFFFFF", stroke: "#FF424242");
         yield return CreateLinkStyle(xmlNamespace, "Inherits From", "HasCategory('InheritsFrom')", "#FF00A600", "2 0", drawArrow: true);
         yield return CreateLinkStyle(xmlNamespace, "Implements", "HasCategory('Implements')", "#8000A600", "2 2", drawArrow: true);
+        yield return CreateLinkStyle(xmlNamespace, "Overrides", "HasCategory('Overrides')", "#FF00A600", "4 2", drawArrow: true);
         yield return CreateLinkStyle(xmlNamespace, "Calls", "HasCategory('CodeSchema_Calls')", "#FFFF00FF", "2 0", drawArrow: true);
         yield return CreateLinkStyle(xmlNamespace, "Function Pointer", "HasCategory('CodeSchema_FunctionPointer')", "#FFFF00FF", "2 2", drawArrow: true);
         yield return CreateLinkStyle(xmlNamespace, "Contains", "HasCategory('Contains')", "#FF808080", "2 0", drawArrow: false);
@@ -270,9 +277,11 @@ public sealed class DgmlSerializer
         var linksElement = EnsureChild(root, "Links");
         var categoriesElement = EnsureChild(root, "Categories");
         var propertiesElement = EnsureChild(root, "Properties");
+        var stylesElement = EnsureChild(root, "Styles");
 
         EnsureCategories(categoriesElement);
         EnsureProperties(propertiesElement);
+        EnsureStyles(stylesElement);
 
         if (replaceContents)
         {
@@ -367,11 +376,35 @@ public sealed class DgmlSerializer
     private XElement CreateStylesElement()
     {
         var element = new XElement(Namespace + "Styles");
+        EnsureStyles(element);
+        return element;
+    }
+
+    /// <summary>
+    /// Adds every schema style whose (TargetType, first Condition expression) pair is not already
+    /// present, so merging into a hand-edited or older document never drops styling and never
+    /// duplicates a style the user already has.
+    /// </summary>
+    private void EnsureStyles(XElement stylesElement)
+    {
+        var existing = new HashSet<string>(
+            stylesElement.Elements(Namespace + "Style").Select(CreateStyleKey),
+            StringComparer.Ordinal);
+
         foreach (var style in _schemaProvider.GetStyles(Namespace))
         {
-            element.Add(style);
+            if (existing.Add(CreateStyleKey(style)))
+            {
+                stylesElement.Add(style);
+            }
         }
-        return element;
+    }
+
+    private static string CreateStyleKey(XElement style)
+    {
+        var targetType = (string?)style.Attribute("TargetType") ?? string.Empty;
+        var expression = (string?)style.Element(Namespace + "Condition")?.Attribute("Expression") ?? string.Empty;
+        return string.Concat(targetType, "|", expression);
     }
 
     private static XElement EnsureRoot(XDocument document)

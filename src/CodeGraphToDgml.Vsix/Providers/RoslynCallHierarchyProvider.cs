@@ -318,9 +318,14 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
                 Enqueue(normalized, depth + 1);
 
-                if (normalized.ContainingType?.TypeKind == TypeKind.Interface)
+                if (CallGraphDispatch.IsInterfaceMember(normalized))
                 {
                     if (await AddInterfaceImplementationsAsync(graph, normalized, calleeProject, roslynSubject.Solution, normalizedOptions, depth, Enqueue, cancellationToken).ConfigureAwait(false))
+                        return graph;
+                }
+                else if (CallGraphDispatch.CanBeOverridden(normalized))
+                {
+                    if (await AddOverridesAsync(graph, normalized, calleeProject, roslynSubject.Solution, normalizedOptions, depth, Enqueue, cancellationToken).ConfigureAwait(false))
                         return graph;
                 }
 
@@ -370,27 +375,62 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         Action<ISymbol, int> enqueue,
         CancellationToken cancellationToken)
     {
-        var implementations = await SymbolFinder.FindImplementationsAsync(
-            interfaceMember, solution, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var implementations = await CallGraphDispatch.FindImplementationsAsync(
+            interfaceMember, solution, cancellationToken).ConfigureAwait(false);
 
-        foreach (var impl in implementations)
+        return AddDispatchTargets(graph, interfaceMember, interfaceProject, solution, options, depth, enqueue, implementations, "Implements");
+    }
+
+    /// <summary>
+    /// For a callee that is virtual, abstract, or a non-sealed override, finds every override in
+    /// the solution, adds each with an <c>Overrides</c> link from the base member to the override,
+    /// and enqueues it for further traversal, so the graph shows the members that may actually run.
+    /// Returns <see langword="true"/> when the node limit has been reached.
+    /// </summary>
+    private static async Task<bool> AddOverridesAsync(
+        TraversalGraph graph,
+        ISymbol member,
+        string? memberProject,
+        RoslynSolution solution,
+        TraversalOptions options,
+        int depth,
+        Action<ISymbol, int> enqueue,
+        CancellationToken cancellationToken)
+    {
+        var overrides = await CallGraphDispatch.FindOverridesAsync(
+            member, solution, cancellationToken).ConfigureAwait(false);
+
+        return AddDispatchTargets(graph, member, memberProject, solution, options, depth, enqueue, overrides, "Overrides");
+    }
+
+    private static bool AddDispatchTargets(
+        TraversalGraph graph,
+        ISymbol member,
+        string? memberProject,
+        RoslynSolution solution,
+        TraversalOptions options,
+        int depth,
+        Action<ISymbol, int> enqueue,
+        IReadOnlyList<ISymbol> targets,
+        string linkCategory)
+    {
+        foreach (var target in targets)
         {
-            var normImpl = CallGraphSyntaxWalker.NormalizeSymbol(impl);
-            if (normImpl is null || !CallGraphFilters.IsAllowed(normImpl, options))
+            if (!CallGraphFilters.IsAllowed(target, options))
             {
                 continue;
             }
 
-            var implProject = normImpl.ContainingAssembly?.Name;
-            AddNodeAndContainers(graph, normImpl, implProject, solution);
+            var targetProject = target.ContainingAssembly?.Name;
+            AddNodeAndContainers(graph, target, targetProject, solution);
 
             graph.AddLink(new GraphLink(
-                GetProjectScopedId(interfaceMember, interfaceProject),
-                GetProjectScopedId(normImpl, implProject),
-                "Implements"));
+                GetProjectScopedId(member, memberProject),
+                GetProjectScopedId(target, targetProject),
+                linkCategory));
 
             if (graph.NodeCount >= options.MaxNodeCount) return true;
-            enqueue(normImpl, depth + 1);
+            enqueue(target, depth + 1);
         }
 
         return false;
@@ -723,14 +763,29 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
                 var calleeId = GetStableId(normalized);
 
                 IReadOnlyList<CallSequenceCallNode> nested;
-                if (normalized.ContainingType?.TypeKind == TypeKind.Interface)
+                if (CallGraphDispatch.IsInterfaceMember(normalized))
                 {
                     visited.Add(calleeId);
-                    nested = await BuildInterfaceDispatchCallsAsync(normalized, calleeParticipantId, depth).ConfigureAwait(false);
+                    var implementations = await CallGraphDispatch.FindImplementationsAsync(normalized, roslynSubject.Solution, cancellationToken).ConfigureAwait(false);
+                    nested = await BuildDispatchCallsAsync(implementations, calleeParticipantId, depth).ConfigureAwait(false);
                 }
                 else if (visited.Add(calleeId))
                 {
-                    nested = await BuildCallsAsync(normalized, calleeParticipantId, depth + 1).ConfigureAwait(false);
+                    var ownBody = await BuildCallsAsync(normalized, calleeParticipantId, depth + 1).ConfigureAwait(false);
+
+                    if (CallGraphDispatch.CanBeOverridden(normalized))
+                    {
+                        // A virtual/abstract callee may dispatch to an override at run time; show
+                        // each override as a dispatch call from the base member's lifeline, after
+                        // the base member's own body, mirroring interface dispatch above.
+                        var overrides = await CallGraphDispatch.FindOverridesAsync(normalized, roslynSubject.Solution, cancellationToken).ConfigureAwait(false);
+                        var dispatch = await BuildDispatchCallsAsync(overrides, calleeParticipantId, depth).ConfigureAwait(false);
+                        nested = dispatch.Count == 0 ? ownBody : [.. ownBody, .. dispatch];
+                    }
+                    else
+                    {
+                        nested = ownBody;
+                    }
                 }
                 else
                 {
@@ -791,35 +846,35 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
             return nodes;
         }
 
-        async Task<IReadOnlyList<CallSequenceCallNode>> BuildInterfaceDispatchCallsAsync(
-            ISymbol interfaceMember,
-            string interfaceParticipantId,
+        // Renders each run-time dispatch target (interface implementation or virtual override) as
+        // a call from the dispatching member's lifeline, with the target's own body nested.
+        async Task<IReadOnlyList<CallSequenceCallNode>> BuildDispatchCallsAsync(
+            IReadOnlyList<ISymbol> targets,
+            string dispatcherParticipantId,
             int depth)
         {
-            var implementations = await SymbolFinder.FindImplementationsAsync(
-                interfaceMember, roslynSubject.Solution, cancellationToken: cancellationToken).ConfigureAwait(false);
-
             var dispatchNodes = new List<CallSequenceCallNode>();
-            foreach (var impl in implementations)
+            foreach (var target in targets)
             {
-                var normImpl = CallGraphSyntaxWalker.NormalizeSymbol(impl);
-                if (normImpl is null || !CallGraphFilters.IsAllowed(normImpl, normalizedOptions))
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (!CallGraphFilters.IsAllowed(target, normalizedOptions))
                     continue;
 
                 nodeCount++;
                 if (nodeCount >= normalizedOptions.MaxNodeCount)
                     break;
 
-                var implParticipantId = GetParticipantId(normImpl, participantTable, interfaceParticipantId);
-                var implId = GetStableId(normImpl);
+                var targetParticipantId = GetParticipantId(target, participantTable, dispatcherParticipantId);
+                var targetId = GetStableId(target);
 
-                IReadOnlyList<CallSequenceCallNode> implBody;
-                if (visited.Add(implId))
-                    implBody = await BuildCallsAsync(normImpl, implParticipantId, depth + 1).ConfigureAwait(false);
+                IReadOnlyList<CallSequenceCallNode> targetBody;
+                if (visited.Add(targetId))
+                    targetBody = await BuildCallsAsync(target, targetParticipantId, depth + 1).ConfigureAwait(false);
                 else
-                    implBody = [];
+                    targetBody = [];
 
-                dispatchNodes.Add(new CallSequenceCallNode(interfaceParticipantId, implParticipantId, GetNodeLabel(normImpl), implBody, GetReturnTypeLabel(normImpl)));
+                dispatchNodes.Add(new CallSequenceCallNode(dispatcherParticipantId, targetParticipantId, GetNodeLabel(target), targetBody, GetReturnTypeLabel(target)));
             }
 
             return dispatchNodes;

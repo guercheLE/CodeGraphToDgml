@@ -48,7 +48,7 @@
 ### Document Lifecycle
 | # | Requirement |
 |---|-------------|
-| FR-30 | When no DGML document is open, **create a temp file** in `%TEMP%` named `CallHierarchy-{timestamp}.dgml` |
+| FR-30 | When no DGML document is open, **create a new file** under `{SolutionDir}\.vs\CodeGraphToDgml\` named `CodeGraph-{timestamp}.dgml` (fall back to `%TEMP%` when no solution is open) |
 | FR-31 | Three **open behaviors** must be supported: `AlwaysAsk`, `AlwaysCreateNewTemporary`, `ReuseActiveIfOpen` |
 | FR-32 | When `AlwaysAsk` and documents are open, show a **document picker dialog** |
 | FR-33 | Optionally **activate (bring to front)** the DGML window after update |
@@ -111,4 +111,4 @@
 | # | Requirement |
 |---|-------------|
 | NFR-13 | Final VSIX must be built from the **Release configuration** |
-| NFR-14 | Extension version is **0.1.2**, published by **Luciano Evaristo Guerche** |
+| NFR-14 | Extension version is defined **once** in `Directory.Build.props` and flows into the VSIX manifest and assemblies; published by **Luciano Evaristo Guerche** |

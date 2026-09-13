@@ -19,7 +19,7 @@ Building and maintaining this took real ideation, time, design effort, and compu
 ### Traverse Down to DGML
 
 - traverses callees downward from C# and Visual Basic methods, properties, and events
-- follows interface implementations and overridden base members so the graph reflects the methods that may actually run at each call site
+- follows interface implementations (`Implements` links) and virtual/abstract overrides in derived types (`Overrides` links) so the graph reflects the methods that may actually run at each call site
 - limits traversal by maximum depth and node count
 - filters properties, events, external symbols, and generated code
 
@@ -28,12 +28,12 @@ Building and maintaining this took real ideation, time, design effort, and compu
 - mirrors Visual Studio's built-in `Find All References` (Shift+F12) for the symbol at the caret
 - supports C# and Visual Basic types (class, struct, interface, record) and members (methods, properties, events, fields)
 - adds a `References` link from each enclosing referrer (method, property, event, field, or type) to the target symbol
-- limits traversal by maximum depth and node count and respects the external symbol and generated code filters
+- limits the result by maximum node count and respects the external symbol and generated code filters (references are a single level, so maximum depth does not apply)
 
 ### Common
 
 - appends to or replaces an open DGML document
-- creates a temporary DGML document when no target document is open
+- creates a new DGML document under `{SolutionDir}\.vs\CodeGraphToDgml\` when no target document is open (falls back to `%TEMP%` without a solution)
 - reports progress in the status bar and a cancellable modal dialog
 - writes execution details to a dedicated Output window pane
 
@@ -51,9 +51,10 @@ Without the DGML editor, Visual Studio cannot open or display `.dgml` files gene
 
 ## Solution Layout
 
-- `src/CodeGraphToDgml.Core`: dependency-free graph and DGML logic
-- `src/CodeGraphToDgml.Vsix`: Visual Studio host integration and Roslyn traversal
-- `tests/CodeGraphToDgml.Tests`: unit tests for the portable core library
+- `src/CodeGraphToDgml.Core`: dependency-free graph model, DGML serializer, and Mermaid sequence serializer
+- `src/CodeGraphToDgml.Roslyn`: host-free Roslyn call-site detection, filters, and dispatch resolution (testable without Visual Studio)
+- `src/CodeGraphToDgml.Vsix`: Visual Studio host integration, commands, options, and the traversal providers
+- `tests/CodeGraphToDgml.Tests`: MSTest unit tests for the Core and Roslyn projects
 
 ## Build
 
@@ -81,7 +82,7 @@ The generated VSIX is written to `src\CodeGraphToDgml.Vsix\bin\Release\net48\Cod
 | DGML append mode | Open an existing DGML file, choose append mode, run the command twice | Existing graph content is preserved and duplicate nodes/links are not added |
 | DGML replace mode | Open an existing DGML file, choose replace mode, run the command | Existing node/link content is replaced by the new traversal result |
 | Target selection | With one or more DGML docs open, test `AlwaysAsk`, `AlwaysCreateNewTemporary`, and `ReuseActiveIfOpen` | Target document behavior matches the selected option |
-| Temp document creation | Run the command when no DGML document is open | A temp `CodeGraph-{timestamp}.dgml` document is created in `%TEMP%` |
+| New document creation | Run the command when no DGML document is open | A `CodeGraph-{timestamp}.dgml` document is created under `{SolutionDir}\.vs\CodeGraphToDgml\` |
 | Window activation | Toggle `Activate result document` and rerun | DGML document is activated only when the option is enabled |
 | Progress and cancel | Start a traversal large enough to observe progress, then cancel | Status bar updates are shown and cancellation stops the operation cleanly |
 | Output logging | Run traversal with `Show detailed output` enabled | Output pane shows resolved symbol, counts, target document, and errors when applicable |
@@ -91,7 +92,7 @@ The generated VSIX is written to `src\CodeGraphToDgml.Vsix\bin\Release\net48\Cod
 | Supported symbols | Place caret on a method, property, and event in separate checks | Traversal starts successfully for each supported symbol kind |
 | Direct callees | Run on a method that calls several other methods | Graph includes the called methods with `Calls` links from the starting method |
 | Interface dispatch | Run on a method that invokes an interface member with multiple implementations | Graph includes each implementing member reachable from the call site |
-| Virtual overrides | Run on a method that calls a virtual member | Graph includes the overriding members in derived types |
+| Virtual overrides | Run on a method that calls a virtual or abstract member | Graph includes each overriding member in derived types, linked from the base member with a green dashed `Overrides` link |
 | Depth limit | Set `Maximum depth` to `1` and run on a method with multi-level callees | Only direct callees are included |
 | Node limit | Set `Maximum node count` to `1` or `2` and run traversal | Traversal stops when the node cap is reached |
 | **All References to DGML** | | |
@@ -99,7 +100,7 @@ The generated VSIX is written to `src\CodeGraphToDgml.Vsix\bin\Release\net48\Cod
 | Unsupported caret target | Place caret on whitespace, a namespace, a using/Imports directive, or a local variable | Informational message is shown and no traversal runs |
 | Type references | Run on a type used in several other files | Graph includes each enclosing referrer (method/property/type) with a `References` link to the target type |
 | Member references | Run on a method, property, event, or field used from multiple call sites | Graph includes each enclosing referrer with a `References` link to the target member |
-| Depth limit | Set `Maximum depth` to `1` and run on a symbol with chained referrers | Only direct referrers are included |
+| Node limit | Set `Maximum node count` to a small value and run on a widely used symbol | Traversal stops when the node cap is reached (`Maximum depth` does not apply; references are a single level) |
 | Filter respect | Toggle `Include external symbols` and `Include generated code` | Result graph respects each option |
 | **Component Hosts** | | |
 | Host discovery | Place caret on a method inside a WinForms/WPF UserControl that is used on a Form, run "Traverse Up to DGML" | Form appears with an orange `UsedBy` link to the UserControl |
