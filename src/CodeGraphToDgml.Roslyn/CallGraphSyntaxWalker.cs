@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using CodeGraphToDgml.Core;
 using CodeGraphToDgml.Roslyn.CallSites;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -30,6 +31,29 @@ public sealed class CalleeInfo
     /// where the enclosing method remains the lexical caller of both invocations.
     /// </summary>
     public ISymbol? FluentReceiver { get; }
+}
+
+/// <summary>
+/// One call site with its control-flow context, as produced by
+/// <see cref="CallGraphSyntaxWalker.FindCallSitesAsync"/>. Unlike <see cref="CalleeInfo"/>,
+/// the same callee can appear several times (once per distinct branch it is called from).
+/// </summary>
+public sealed class CallSiteInfo
+{
+    public CallSiteInfo(ISymbol symbol, ISymbol? fluentReceiver, IReadOnlyList<CallSequenceFragmentScope> fragmentPath)
+    {
+        Symbol = symbol;
+        FluentReceiver = fluentReceiver;
+        FragmentPath = fragmentPath;
+    }
+
+    public ISymbol Symbol { get; }
+
+    /// <inheritdoc cref="CalleeInfo.FluentReceiver"/>
+    public ISymbol? FluentReceiver { get; }
+
+    /// <summary>Enclosing fragments within the walked member, outermost first; empty for straight-line code.</summary>
+    public IReadOnlyList<CallSequenceFragmentScope> FragmentPath { get; }
 }
 
 /// <summary>
@@ -164,6 +188,63 @@ public static class CallGraphSyntaxWalker
         }
 
         return callees;
+    }
+
+    /// <summary>
+    /// Discovers every call site reachable from <paramref name="symbol"/>'s declaring syntax
+    /// together with the control-flow constructs enclosing it, in evaluation order. Symbols
+    /// are normalized and already filtered by <see cref="CallGraphFilters.IsAllowed"/> (so a
+    /// branch whose only calls are filtered out counts as empty). A callee called twice in the
+    /// same branch is reported once; called from two branches, it is reported once per branch.
+    /// Event subscriptions are reported at their statement, not appended last.
+    /// </summary>
+    public static async Task<IReadOnlyList<CallSiteInfo>> FindCallSitesAsync(
+        ISymbol symbol,
+        RoslynSolution solution,
+        TraversalOptions options,
+        CancellationToken cancellationToken)
+    {
+        var normalizedOptions = options.Normalize();
+        var selfNormalized = NormalizeSymbol(symbol);
+        var collected = new List<(RawCallSite Site, IReadOnlyList<RawFlowScope> Scopes)>();
+
+        foreach (var syntaxRef in symbol.DeclaringSyntaxReferences)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var syntaxNode = await syntaxRef.GetSyntaxAsync(cancellationToken).ConfigureAwait(false);
+            var walker = CallSiteWalkerFactory.For(syntaxNode.Language);
+            if (walker is null)
+            {
+                continue;
+            }
+
+            var document = solution.GetDocument(syntaxRef.SyntaxTree);
+            if (document is null)
+            {
+                continue;
+            }
+
+            var semanticModel = await document.GetSemanticModelAsync(cancellationToken).ConfigureAwait(false);
+            if (semanticModel is null)
+            {
+                continue;
+            }
+
+            var body = walker.GetBodyNode(syntaxNode);
+
+            foreach (var site in walker.EnumerateCallSites(body, semanticModel, selfNormalized, cancellationToken))
+            {
+                if (!CallGraphFilters.IsAllowed(site.Symbol, normalizedOptions))
+                {
+                    continue;
+                }
+
+                collected.Add((site, walker.GetFlowContext(site.Site, body)));
+            }
+        }
+
+        return FlowContextFinalizer.Finalize(collected, normalizedOptions.MaxConditionLabelLength);
     }
 
     /// <summary>

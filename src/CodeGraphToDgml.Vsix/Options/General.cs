@@ -146,6 +146,12 @@ internal class General : BaseOptionModel<General>
     [DefaultValue(60)]
     public int SequenceDiagramMaxMessagesPerDiagram { get; set; } = 60;
 
+    [Category("Sequence Diagram")]
+    [DisplayName("Max condition label length")]
+    [Description("Used by Traverse Down to Sequence Diagram (with Control Flow): fragment labels (if/switch/loop conditions) longer than this are truncated with an ellipsis. Values less than 10 are clamped to 10.")]
+    [DefaultValue(40)]
+    public int SequenceDiagramMaxConditionLabelLength { get; set; } = 40;
+
     [Category("UI")]
     [DisplayName("Activate result document")]
     [Description("When enabled, the DGML document is brought to the front after it is updated.")]
@@ -173,6 +179,7 @@ internal class General : BaseOptionModel<General>
             MaxHostDepth = MaxHostDepth,
             CollapseGroups = CollapseGroups,
             GraphDirection = GraphDirection,
+            MaxConditionLabelLength = SequenceDiagramMaxConditionLabelLength,
         }.Normalize();
     }
 }

@@ -32,6 +32,18 @@ Building and maintaining this took real ideation, time, design effort, and compu
 - adds a `References` link from each enclosing referrer (method, property, event, field, or type) to the target symbol
 - limits the result by maximum node count and respects the external symbol and generated code filters (references are a single level, so maximum depth does not apply)
 
+### Traverse Down to Sequence Diagram (with Control Flow)
+
+- same traversal as the command above, rendered with Mermaid combined fragments so the diagram shows *when* each call happens
+- `if` / `else if` / `else`, `switch` statements and expressions, and `?:` become `alt` sections (an `if` whose other branches make no calls becomes `opt`)
+- `for`, `foreach`, `while`, and `do` become `loop`; `catch` clauses become `break`; `try` bodies, `finally`, `using`, `lock`, lambdas, and `?.` are transparent
+- a call inside a condition (`if (Check())`) is placed before the fragment, since it runs before the branch is chosen
+- an interface member or virtual method with several implementations renders as one `alt` with a branch per implementing type
+- the same callee reached from two branches appears once per branch; a fragment cut by the diagram splitter is re-opened in the next part with a `(cont.)` marker
+- fragment labels are truncated to `Max condition label length` (default 40)
+- Visual Basic members are rendered without fragments for now (control-flow mapping for VB is pending)
+- output files are named `CodeSequenceFlow-{timestamp}.md` / `.html`
+
 ### Common
 
 - appends to or replaces an open DGML document
@@ -123,6 +135,11 @@ One-time setup on GitHub:
 | Member references | Run on a method, property, event, or field used from multiple call sites | Graph includes each enclosing referrer with a `References` link to the target member |
 | Node limit | Set `Maximum node count` to a small value and run on a widely used symbol | Traversal stops when the node cap is reached (`Maximum depth` does not apply; references are a single level) |
 | Filter respect | Toggle `Include external symbols` and `Include generated code` | Result graph respects each option |
+| **Traverse Down to Sequence Diagram (with Control Flow)** | | |
+| Branches | Run on a method with `if/else`, `switch`, and `?:` | Calls appear inside `alt` sections labelled with the condition; a lone branch renders as `opt` |
+| Loops and catch | Run on a method with `foreach`/`for`/`while`/`do` and `try/catch` | Calls inside loops are wrapped in `loop`, calls in `catch` in `break`; calls in the `try` body are not wrapped |
+| Dispatch | Run on a method calling an interface with two implementations | One `alt` with a branch per implementing type |
+| Splitting | Lower `Max messages per diagram` so a fragment is cut across parts | The next part re-opens the fragment with a `(cont.)` label and every part is balanced |
 | **Component Hosts** | | |
 | Host discovery | Place caret on a method inside a WinForms/WPF UserControl that is used on a Form, run "Traverse Up to DGML" | Form appears with an orange `UsedBy` link to the UserControl |
 | Nested hosting | UserControl A hosted in UserControl B hosted in a Form, set `Maximum host depth` to `2`+ | All three levels appear with UsedBy chains: Form → B → A |

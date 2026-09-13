@@ -169,6 +169,9 @@ internal sealed class VisualBasicCallSiteWalker : ICallSiteWalker
         }
     }
 
+    public IReadOnlyList<RawFlowScope> GetFlowContext(SyntaxNode site, SyntaxNode body)
+        => VisualBasicFlowContext.GetFlowContext(site, body);
+
     private static IEnumerable<RawCallSite> HandleCall(
         SyntaxNode site,
         ExpressionSyntax target,

@@ -24,13 +24,24 @@ public sealed record TraversalOptions
 
     public GraphDirection GraphDirection { get; init; } = GraphDirection.TopToBottom;
 
+    /// <summary>
+    /// Sequence diagrams only: wrap calls in Mermaid <c>alt</c>/<c>opt</c>/<c>loop</c>/<c>break</c>
+    /// fragments derived from the enclosing if/switch/loop/catch statements, and render interface
+    /// or virtual dispatch as one <c>alt</c> branch per implementation.
+    /// </summary>
+    public bool IncludeControlFlow { get; init; }
+
+    /// <summary>Maximum length of a fragment label (condition text) before it is truncated with an ellipsis.</summary>
+    public int MaxConditionLabelLength { get; init; } = 40;
+
     public TraversalOptions Normalize()
     {
         return this with
         {
             MaxDepth = MaxDepth < 1 ? 1 : MaxDepth,
             MaxNodeCount = MaxNodeCount < 1 ? 1 : MaxNodeCount,
-            MaxHostDepth = MaxHostDepth < 1 ? 1 : MaxHostDepth
+            MaxHostDepth = MaxHostDepth < 1 ? 1 : MaxHostDepth,
+            MaxConditionLabelLength = MaxConditionLabelLength < 10 ? 10 : MaxConditionLabelLength,
         };
     }
 }

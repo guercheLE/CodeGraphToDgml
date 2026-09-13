@@ -42,8 +42,7 @@ public sealed class MermaidSequenceSerializer
         }
         else
         {
-            foreach (var call in sequence.RootCalls)
-                EmitCall(sb, call, stackedActivationBars);
+            EmitSiblings(sb, sequence.RootCalls, null, stackedActivationBars);
         }
 
         while (sb.Length > 0 && (sb[sb.Length - 1] == '\r' || sb[sb.Length - 1] == '\n'))
@@ -80,15 +79,13 @@ public sealed class MermaidSequenceSerializer
         if (stackedActivationBars)
         {
             sb.Append("    ").Append(callerId).Append("->>+").Append(sequence.RootParticipantId).Append(": ").AppendLine(rootLabel);
-            foreach (var call in sequence.RootCalls)
-                EmitCall(sb, call, stackedActivationBars);
+            EmitSiblings(sb, sequence.RootCalls, null, stackedActivationBars);
             sb.Append("    ").Append(sequence.RootParticipantId).Append("-->>-").Append(callerId).Append(": ").AppendLine(EscapeLabel(BuildReturnLabel(sequence.RootMethodLabel, sequence.RootReturnTypeLabel)));
         }
         else
         {
             sb.Append("    ").Append(callerId).Append("->>").Append(sequence.RootParticipantId).Append(": ").AppendLine(rootLabel);
-            foreach (var call in sequence.RootCalls)
-                EmitCall(sb, call, stackedActivationBars);
+            EmitSiblings(sb, sequence.RootCalls, null, stackedActivationBars);
         }
     }
 
@@ -244,6 +241,14 @@ public sealed class MermaidSequenceSerializer
         public string ReturnTypeLabel { get; set; } = "";
         public bool IsFirstSubPart { get; set; }
         public bool IsLastSubPart { get; set; }
+
+        // The split call's own enclosing fragments: re-opened around the frame in every sub-part
+        // (with a "(cont.)" marker on all but the sub-part that first opens each of them).
+        public IReadOnlyList<CallSequenceFragmentScope> FragmentPath { get; set; } = [];
+
+        // How many leading fragments of FragmentPath were already open before the split call
+        // (shared with its previous sibling), so even the first sub-part marks them continued.
+        public int ContinuedFragmentDepth { get; set; }
     }
 
     private sealed class SegmentPlan
@@ -262,6 +267,10 @@ public sealed class MermaidSequenceSerializer
         public string? PrevTitle { get; set; }
         public string? NextTitle { get; set; }
         public List<CallSequenceCallNode> VirtualRootCalls { get; set; } = new List<CallSequenceCallNode>();
+
+        // The sibling that precedes VirtualRootCalls[0] in the original call list, when the cut
+        // fell between siblings; lets the renderer re-open fragments the cut split in two.
+        public CallSequenceCallNode? PrevSibling { get; set; }
 
         // Item 2: whether this is the first/last segment of the whole (possibly multi-part)
         // diagram — used to decide where the synthetic «Caller» actor's opening/closing arrows
@@ -348,13 +357,15 @@ public sealed class MermaidSequenceSerializer
         var allPlans = new List<SegmentPlan>();
         int phaseNumber = 1;
 
-        foreach (var phase in phases)
+        for (int i = 0; i < phases.Count; i++)
         {
+            var phase = phases[i];
             var phaseParts = GetCallListParticipants(phase);
             phaseParts.UnionWith(rootBoundary);
 
+            var prevSibling = i == 0 ? null : phases[i - 1][phases[i - 1].Count - 1];
             allPlans.AddRange(ExpandPhase(phase, phaseParts, phaseNumber.ToString(), depth: 1,
-                maxParticipants, maxMessages, stackedBars));
+                maxParticipants, maxMessages, stackedBars, prevSibling));
 
             phaseNumber++;
         }
@@ -423,16 +434,17 @@ public sealed class MermaidSequenceSerializer
         int depth,
         int maxParticipants,
         int maxMessages,
-        bool stackedBars)
+        bool stackedBars,
+        CallSequenceCallNode? prevSibling)
     {
         bool fits = participants.Count <= maxParticipants
             && CountArrows(calls, stackedBars) <= maxMessages;
         if (fits || calls.Count != 1)
-            return [MakeLeafPlan(calls, participants, partNumber)];
+            return [MakeLeafPlan(calls, participants, partNumber, prevSibling)];
 
         var parentCall = calls[0];
         if (parentCall.NestedCalls.Count == 0)
-            return [MakeLeafPlan(calls, participants, partNumber)];
+            return [MakeLeafPlan(calls, participants, partNumber, prevSibling)];
 
         var boundary = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -454,18 +466,20 @@ public sealed class MermaidSequenceSerializer
             // letter/digit suffix alternation tracking actual split levels, not descent levels).
             var childPartNumber = subPhases.Count == 1 ? partNumber : ChildPartNumber(partNumber, i, depth);
             var childDepth = subPhases.Count == 1 ? depth : depth + 1;
+            var subPrevSibling = i == 0 ? null : subPhases[i - 1][subPhases[i - 1].Count - 1];
             leaves.AddRange(ExpandPhase(subCalls, subParts, childPartNumber, childDepth,
-                maxParticipants, maxMessages, stackedBars));
+                maxParticipants, maxMessages, stackedBars, subPrevSibling));
         }
 
         // Nothing actually split (however deep we descended, no divisible level was found) —
         // emit the original call as one leaf rather than wrapping it in a pointless frame.
         if (leaves.Count == 1)
-            return [MakeLeafPlan(calls, participants, partNumber)];
+            return [MakeLeafPlan(calls, participants, partNumber, prevSibling)];
 
         // The parent call is "in flight" across every leaf produced above — the first leaf opens
         // it with the real arrow, the last leaf closes it, everything in between just keeps its
-        // bars alive.
+        // bars alive. Its enclosing fragments are re-opened around it in every leaf.
+        int continuedDepth = CommonInstancePrefixLength(prevSibling?.FragmentPath, parentCall.FragmentPath);
         for (int i = 0; i < leaves.Count; i++)
         {
             leaves[i].SplitParents.Insert(0, new SplitFrame
@@ -476,6 +490,8 @@ public sealed class MermaidSequenceSerializer
                 ReturnTypeLabel = parentCall.ReturnTypeLabel,
                 IsFirstSubPart = i == 0,
                 IsLastSubPart = i == leaves.Count - 1,
+                FragmentPath = parentCall.FragmentPath,
+                ContinuedFragmentDepth = continuedDepth,
             });
 
             // This frame's caller/callee lifelines get activate/deactivate lines in every leaf,
@@ -490,13 +506,14 @@ public sealed class MermaidSequenceSerializer
         return leaves;
     }
 
-    private static SegmentPlan MakeLeafPlan(List<CallSequenceCallNode> calls, HashSet<string> participants, string partNumber)
+    private static SegmentPlan MakeLeafPlan(List<CallSequenceCallNode> calls, HashSet<string> participants, string partNumber, CallSequenceCallNode? prevSibling)
         => new()
         {
             PartNumber = partNumber,
             Title = InferTitle(calls),
             ParticipantIds = new List<string>(participants),
             VirtualRootCalls = calls,
+            PrevSibling = prevSibling,
         };
 
     // Alternates the sub-part numbering style by nesting depth so a second-level split reads
@@ -545,9 +562,14 @@ public sealed class MermaidSequenceSerializer
             var callParticipants = GetSubtreeParticipants(call);
             int callMessages = CountArrowsInSubtree(call, stackedBars);
 
+            // A soft (business-flow) seam is never drawn inside a control-flow fragment; only
+            // the hard caps can cut there, and the renderer re-opens the fragment as "(cont.)".
+            bool sharesFragment = current.Count > 0
+                && CommonInstancePrefixLength(current[current.Count - 1].FragmentPath, call.FragmentPath) > 0;
+
             if (current.Count > 0 && ShouldCutBefore(
                     currentParticipants, currentMessages, callParticipants, callMessages,
-                    boundaryParticipants, maxParticipants, maxMessages))
+                    boundaryParticipants, maxParticipants, maxMessages, sharesFragment))
             {
                 segments.Add(current);
                 current = new List<CallSequenceCallNode>();
@@ -638,7 +660,8 @@ public sealed class MermaidSequenceSerializer
         int nextMessages,
         HashSet<string> boundaryParticipants,
         int maxParticipants,
-        int maxMessages)
+        int maxMessages,
+        bool sharesFragment = false)
     {
         var combined = new HashSet<string>(segParticipants, StringComparer.Ordinal);
         combined.UnionWith(nextParticipants);
@@ -647,6 +670,9 @@ public sealed class MermaidSequenceSerializer
 
         if (segMessages + nextMessages > maxMessages)
             return true;
+
+        if (sharesFragment)
+            return false;
 
         // Natural business-flow seam: the next call barely overlaps what's accumulated so far
         // (excluding always-present boundary participants), and the segment already has enough
@@ -808,44 +834,49 @@ public sealed class MermaidSequenceSerializer
 
         if (hasSplitParent)
         {
-            if (stackedBars)
-            {
-                if (splitCallerNeedsOwnBar)
-                    sb.Append("    activate ").AppendLine(plan.SplitParents[0].CallerParticipantId);
+            if (stackedBars && splitCallerNeedsOwnBar)
+                sb.Append("    activate ").AppendLine(plan.SplitParents[0].CallerParticipantId);
 
-                foreach (var frame in plan.SplitParents)
+            foreach (var frame in plan.SplitParents)
+            {
+                // The split call's fragments wrap its arrow, body, and return in every sub-part.
+                for (int f = 0; f < frame.FragmentPath.Count; f++)
+                    EmitFragmentOpen(sb, frame.FragmentPath[f], continued: !frame.IsFirstSubPart || f < frame.ContinuedFragmentDepth);
+
+                if (stackedBars)
                 {
                     if (frame.IsFirstSubPart)
                         sb.Append("    ").Append(frame.CallerParticipantId).Append("->>+").Append(frame.CalleeParticipantId).Append(": ").AppendLine(EscapeLabel(frame.MessageLabel));
                     else
                         sb.Append("    activate ").AppendLine(frame.CalleeParticipantId);
                 }
-            }
-            else
-            {
-                foreach (var frame in plan.SplitParents)
+                else if (frame.IsFirstSubPart)
                 {
-                    if (frame.IsFirstSubPart)
-                        sb.Append("    ").Append(frame.CallerParticipantId).Append("->>").Append(frame.CalleeParticipantId).Append(": ").AppendLine(EscapeLabel(frame.MessageLabel));
+                    sb.Append("    ").Append(frame.CallerParticipantId).Append("->>").Append(frame.CalleeParticipantId).Append(": ").AppendLine(EscapeLabel(frame.MessageLabel));
                 }
             }
         }
 
-        foreach (var call in plan.VirtualRootCalls)
-            EmitCall(sb, call, stackedBars);
+        EmitSiblings(sb, plan.VirtualRootCalls, plan.PrevSibling, stackedBars);
 
-        if (hasSplitParent && stackedBars)
+        if (hasSplitParent)
         {
             for (int i = plan.SplitParents.Count - 1; i >= 0; i--)
             {
                 var frame = plan.SplitParents[i];
-                if (frame.IsLastSubPart)
-                    sb.Append("    ").Append(frame.CalleeParticipantId).Append("-->>-").Append(frame.CallerParticipantId).Append(": ").AppendLine(EscapeLabel(BuildReturnLabel(frame.MessageLabel, frame.ReturnTypeLabel)));
-                else
-                    sb.Append("    deactivate ").AppendLine(frame.CalleeParticipantId);
+                if (stackedBars)
+                {
+                    if (frame.IsLastSubPart)
+                        sb.Append("    ").Append(frame.CalleeParticipantId).Append("-->>-").Append(frame.CallerParticipantId).Append(": ").AppendLine(EscapeLabel(BuildReturnLabel(frame.MessageLabel, frame.ReturnTypeLabel)));
+                    else
+                        sb.Append("    deactivate ").AppendLine(frame.CalleeParticipantId);
+                }
+
+                for (int f = 0; f < frame.FragmentPath.Count; f++)
+                    sb.AppendLine("    end");
             }
 
-            if (splitCallerNeedsOwnBar)
+            if (stackedBars && splitCallerNeedsOwnBar)
                 sb.Append("    deactivate ").AppendLine(plan.SplitParents[0].CallerParticipantId);
         }
 
@@ -877,16 +908,178 @@ public sealed class MermaidSequenceSerializer
         if (stackedActivationBars)
         {
             sb.Append("    ").Append(from).Append("->>+").Append(to).Append(": ").AppendLine(label);
-            foreach (var nested in call.NestedCalls)
-                EmitCall(sb, nested, stackedActivationBars);
+            EmitSiblings(sb, call.NestedCalls, null, stackedActivationBars);
             sb.Append("    ").Append(to).Append("-->>-").Append(from).Append(": ").AppendLine(EscapeLabel(BuildReturnLabel(call.MessageLabel, call.ReturnTypeLabel)));
         }
         else
         {
             sb.Append("    ").Append(from).Append("->>").Append(to).Append(": ").AppendLine(label);
-            foreach (var nested in call.NestedCalls)
-                EmitCall(sb, nested, stackedActivationBars);
+            EmitSiblings(sb, call.NestedCalls, null, stackedActivationBars);
         }
+    }
+
+    // ── Control-flow fragments ────────────────────────────────────────────────
+
+    // Emits a sibling list, opening and closing the Mermaid fragments (alt/opt/loop/...) that the
+    // siblings' FragmentPaths describe. Adjacent siblings sharing a fragment instance stay inside
+    // one fragment; a different section of the same instance emits the section separator; any
+    // other change closes the fragments no longer shared and opens the new ones. Every fragment
+    // opened here is closed here, so each sibling list is self-balanced. When `prevSibling` is
+    // given (a split part whose first call continues a fragment cut in the previous part), the
+    // shared fragments are re-opened first with a "(cont.)" marker.
+    private static void EmitSiblings(StringBuilder sb, IReadOnlyList<CallSequenceCallNode> calls, CallSequenceCallNode? prevSibling, bool stackedActivationBars)
+    {
+        if (calls.Count == 0)
+            return;
+
+        var open = new List<CallSequenceFragmentScope>();
+
+        if (prevSibling is not null)
+        {
+            var first = calls[0].FragmentPath;
+            int shared = CommonInstancePrefixLength(prevSibling.FragmentPath, first);
+            for (int i = 0; i < shared; i++)
+            {
+                EmitFragmentOpen(sb, first[i], continued: true);
+                open.Add(first[i]);
+            }
+        }
+
+        foreach (var call in calls)
+        {
+            var path = call.FragmentPath;
+
+            int k = 0;
+            while (k < open.Count && k < path.Count
+                && open[k].InstanceId == path[k].InstanceId
+                && open[k].SectionIndex == path[k].SectionIndex)
+            {
+                k++;
+            }
+
+            if (k < open.Count && k < path.Count && open[k].InstanceId == path[k].InstanceId)
+            {
+                // Same fragment instance, next section: close everything nested deeper, then
+                // switch sections in place.
+                for (int i = open.Count - 1; i > k; i--)
+                {
+                    sb.AppendLine("    end");
+                    open.RemoveAt(i);
+                }
+
+                EmitSectionSeparator(sb, path[k]);
+                open[k] = path[k];
+                k++;
+            }
+            else
+            {
+                for (int i = open.Count - 1; i >= k; i--)
+                {
+                    sb.AppendLine("    end");
+                    open.RemoveAt(i);
+                }
+            }
+
+            for (int i = k; i < path.Count; i++)
+            {
+                EmitFragmentOpen(sb, path[i], continued: false);
+                open.Add(path[i]);
+            }
+
+            EmitCall(sb, call, stackedActivationBars);
+        }
+
+        for (int i = open.Count - 1; i >= 0; i--)
+            sb.AppendLine("    end");
+    }
+
+    private static void EmitFragmentOpen(StringBuilder sb, CallSequenceFragmentScope scope, bool continued)
+    {
+        sb.Append("    ").Append(FragmentKeyword(scope.Kind));
+        AppendFragmentLabel(sb, scope.Label, continued);
+        sb.AppendLine();
+    }
+
+    private static void EmitSectionSeparator(StringBuilder sb, CallSequenceFragmentScope scope)
+    {
+        switch (scope.Kind)
+        {
+            case SequenceFragmentKind.Alt:
+                sb.Append("    else");
+                break;
+            case SequenceFragmentKind.Par:
+                sb.Append("    and");
+                break;
+            case SequenceFragmentKind.Critical:
+                sb.Append("    option");
+                break;
+            default:
+                // Single-section kinds have no separator: close and re-open.
+                sb.AppendLine("    end");
+                sb.Append("    ").Append(FragmentKeyword(scope.Kind));
+                break;
+        }
+
+        AppendFragmentLabel(sb, scope.Label, continued: false);
+        sb.AppendLine();
+    }
+
+    private static void AppendFragmentLabel(StringBuilder sb, string label, bool continued)
+    {
+        var text = EscapeFragmentLabel(label);
+        if (continued)
+            text = text.Length == 0 ? "(cont.)" : text + " (cont.)";
+        if (text.Length > 0)
+            sb.Append(' ').Append(text);
+    }
+
+    private static string FragmentKeyword(SequenceFragmentKind kind)
+        => kind switch
+        {
+            SequenceFragmentKind.Alt => "alt",
+            SequenceFragmentKind.Opt => "opt",
+            SequenceFragmentKind.Loop => "loop",
+            SequenceFragmentKind.Break => "break",
+            SequenceFragmentKind.Par => "par",
+            SequenceFragmentKind.Critical => "critical",
+            _ => "opt",
+        };
+
+    // Number of leading fragment scopes two sibling paths share (by instance), i.e. how many
+    // fragments would stay open across the boundary between them.
+    private static int CommonInstancePrefixLength(IReadOnlyList<CallSequenceFragmentScope>? a, IReadOnlyList<CallSequenceFragmentScope>? b)
+    {
+        if (a is null || b is null)
+            return 0;
+
+        int n = 0;
+        while (n < a.Count && n < b.Count && a[n].InstanceId == b[n].InstanceId)
+            n++;
+        return n;
+    }
+
+    // Fragment labels sit on a keyword line, where ';' would end the statement and '%' could
+    // start a comment, so they get a stricter escape than message labels.
+    private static string EscapeFragmentLabel(string label)
+    {
+        var sb = new StringBuilder(label.Length + 8);
+        foreach (var c in label)
+        {
+            switch (c)
+            {
+                case ':': sb.Append("#colon;"); break;
+                case '<': sb.Append("#lt;"); break;
+                case '>': sb.Append("#gt;"); break;
+                case '&': sb.Append("#amp;"); break;
+                case ';': sb.Append("#semi;"); break;
+                case '%': sb.Append("#37;"); break;
+                case '#': sb.Append("#35;"); break;
+                case '\r': break;
+                case '\n': sb.Append(' '); break;
+                default: sb.Append(c); break;
+            }
+        }
+        return sb.ToString();
     }
 
     // Labels a return arrow with which call is returning and, when known, its declared return

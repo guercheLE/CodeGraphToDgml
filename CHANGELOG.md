@@ -17,6 +17,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- New command "Traverse Down to Sequence Diagram (with Control Flow)": calls are wrapped in Mermaid `alt`/`opt`/`loop`/`break` fragments derived from the enclosing `if`/`switch`/loop/`catch` statements, interface and virtual dispatch renders as an `alt` per implementation, and split parts re-open fragments with a `(cont.)` marker. New option "Max condition label length". The existing sequence command is unchanged.
 - Marketplace metadata in the VSIX manifest: icon, preview image, license, more-info and release-notes links, tags.
 - The DGML editor component is declared as an installation prerequisite, and a one-time warning explains how to install it when it is missing at run time.
 - GitHub Actions workflow: build, test, VSIX artifact, GitHub release on `v*` tags, and a manually approved Marketplace publish job.

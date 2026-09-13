@@ -234,6 +234,9 @@ internal sealed class CSharpCallSiteWalker : ICallSiteWalker
         }
     }
 
+    public IReadOnlyList<RawFlowScope> GetFlowContext(SyntaxNode site, SyntaxNode body)
+        => CSharpFlowContext.GetFlowContext(site, body);
+
     /// <summary>
     /// Normalizes <paramref name="symbol"/> and returns it only when it is a supported callee
     /// and not the walked member itself.

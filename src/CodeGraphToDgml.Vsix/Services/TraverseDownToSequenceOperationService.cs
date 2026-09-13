@@ -31,14 +31,22 @@ internal sealed class TraverseDownToSequenceOperationService
         return _providerRegistry.SupportsFilePath(filePath);
     }
 
-    public async Task ExecuteAsync()
+    /// <param name="includeControlFlow">
+    /// When true (the "with Control Flow" command), calls are wrapped in Mermaid alt/opt/loop/break
+    /// fragments derived from the enclosing if/switch/loop/catch statements, and dispatch to
+    /// several implementations renders as an alt with one branch each.
+    /// </param>
+    public async Task ExecuteAsync(bool includeControlFlow = false)
     {
-        await _outputWindowLogger.WriteLineAsync($"[{DateTime.Now:HH:mm:ss.fff}] TraverseDownToSequence ExecuteAsync: started").ConfigureAwait(false);
+        var statusPrefix = includeControlFlow ? "Code Graph to Sequence (flow)" : "Code Graph to Sequence";
+        var filePrefix = includeControlFlow ? "CodeSequenceFlow" : "CodeSequence";
+
+        await _outputWindowLogger.WriteLineAsync($"[{DateTime.Now:HH:mm:ss.fff}] TraverseDownToSequence ExecuteAsync: started (controlFlow={includeControlFlow})").ConfigureAwait(false);
 
         var options = General.Instance;
         using var progress = new OperationProgressController(_package);
 
-        progress.Start("Code Graph to Sequence: resolving symbol...");
+        progress.Start($"{statusPrefix}: resolving symbol...");
 
         try
         {
@@ -47,7 +55,7 @@ internal sealed class TraverseDownToSequenceOperationService
             if (resolution is null)
             {
                 await _outputWindowLogger.WriteLineAsync("No supported symbol was found at the caret.").ConfigureAwait(true);
-                await progress.FailAsync("Code Graph to Sequence: no supported symbol at the caret.").ConfigureAwait(true);
+                await progress.FailAsync($"{statusPrefix}: no supported symbol at the caret.").ConfigureAwait(true);
                 await VsMessageBoxHelper.ShowAsync(
                     _package,
                     "Place the caret on a C# or Visual Basic method, property, or event and try again.",
@@ -60,10 +68,10 @@ internal sealed class TraverseDownToSequenceOperationService
                 await _outputWindowLogger.WriteLineAsync($"Resolved subject: {resolution.Value.Subject.DisplayName}").ConfigureAwait(true);
             }
 
-            progress.ReportStatus("Code Graph to Sequence: traversing callees...");
+            progress.ReportStatus($"{statusPrefix}: traversing callees...");
             var sequence = await resolution.Value.Provider.TraverseDownToSequenceAsync(
                 resolution.Value.Subject,
-                options.ToTraversalOptions(),
+                options.ToTraversalOptions() with { IncludeControlFlow = includeControlFlow },
                 progress.Progress,
                 progress.Token).ConfigureAwait(false);
 
@@ -72,7 +80,7 @@ internal sealed class TraverseDownToSequenceOperationService
                 await _outputWindowLogger.WriteLineAsync($"Traversal complete. Participants: {sequence.Participants.Count}, Root calls: {sequence.RootCalls.Count}.").ConfigureAwait(true);
             }
 
-            progress.ReportStatus("Code Graph to Sequence: writing output...");
+            progress.ReportStatus($"{statusPrefix}: writing output...");
 
             var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmssfff");
             var serializer = new MermaidSequenceSerializer();
@@ -91,13 +99,13 @@ internal sealed class TraverseDownToSequenceOperationService
             {
                 if (format == SequenceDiagramOutputFormat.Markdown || format == SequenceDiagramOutputFormat.Both)
                 {
-                    mdPath = Path.Combine(tempDir, $"CodeSequence-{timestamp}.md");
+                    mdPath = Path.Combine(tempDir, $"{filePrefix}-{timestamp}.md");
                     File.WriteAllText(mdPath, serializer.BuildMarkdown(sequence, stackedActivationBars, autoNumber, maxParticipantsPerDiagram, maxMessagesPerDiagram), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
                 }
 
                 if (format == SequenceDiagramOutputFormat.Html || format == SequenceDiagramOutputFormat.Both)
                 {
-                    htmlPath = Path.Combine(tempDir, $"CodeSequence-{timestamp}.html");
+                    htmlPath = Path.Combine(tempDir, $"{filePrefix}-{timestamp}.html");
                     File.WriteAllText(htmlPath, serializer.BuildHtml(sequence, stackedActivationBars, autoNumber, maxParticipantsPerDiagram, maxMessagesPerDiagram), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
                 }
             }).ConfigureAwait(false);
@@ -108,7 +116,7 @@ internal sealed class TraverseDownToSequenceOperationService
                 if (htmlPath is not null) await _outputWindowLogger.WriteLineAsync($"HTML: {htmlPath}").ConfigureAwait(true);
             }
 
-            await progress.CompleteAsync("Code Graph to Sequence: completed.").ConfigureAwait(true);
+            await progress.CompleteAsync($"{statusPrefix}: completed.").ConfigureAwait(true);
 
             if (options.ActivateDgmlWindow)
             {
@@ -140,13 +148,13 @@ internal sealed class TraverseDownToSequenceOperationService
         {
             ActivityLog.TryLogInformation(nameof(TraverseDownToSequenceOperationService), "Traversal cancelled by user.");
             await _outputWindowLogger.WriteLineAsync("Traversal cancelled by user.").ConfigureAwait(true);
-            await progress.FailAsync("Code Graph to Sequence: cancelled.").ConfigureAwait(true);
+            await progress.FailAsync($"{statusPrefix}: cancelled.").ConfigureAwait(true);
         }
         catch (Exception ex)
         {
             ActivityLog.TryLogError(nameof(TraverseDownToSequenceOperationService), $"Unhandled error: {ex}");
             await _outputWindowLogger.WriteLineAsync($"Unhandled error: {ex}").ConfigureAwait(true);
-            await progress.FailAsync("Code Graph to Sequence: failed.").ConfigureAwait(true);
+            await progress.FailAsync($"{statusPrefix}: failed.").ConfigureAwait(true);
             await VsMessageBoxHelper.ShowAsync(_package, ex.Message, OLEMSGICON.OLEMSGICON_CRITICAL).ConfigureAwait(true);
         }
     }

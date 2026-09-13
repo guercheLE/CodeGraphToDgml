@@ -1,8 +1,27 @@
 using System.Collections.Generic;
 using System.Threading;
+using CodeGraphToDgml.Core;
 using Microsoft.CodeAnalysis;
 
 namespace CodeGraphToDgml.Roslyn.CallSites;
+
+/// <summary>
+/// One enclosing control-flow construct of a call site, before instance numbering and label
+/// truncation (see <see cref="FlowContextFinalizer"/>).
+/// </summary>
+/// <param name="Construct">The syntax node of the construct (if chain root, switch, loop, catch, ...); identity of the fragment instance.</param>
+/// <param name="Kind">Fragment kind to render.</param>
+/// <param name="SectionIndex">Zero-based section of the construct the site sits in.</param>
+/// <param name="Label">Section label (condition text, loop header, "else", ...).</param>
+/// <param name="IsElseSection">True for a plain else/default section.</param>
+/// <param name="FirstSectionLabel">Label of section 0, used to phrase a lone else section as "not (...)".</param>
+internal sealed record RawFlowScope(
+    SyntaxNode Construct,
+    SequenceFragmentKind Kind,
+    int SectionIndex,
+    string Label,
+    bool IsElseSection,
+    string FirstSectionLabel);
 
 /// <summary>
 /// One call site discovered in a member body. <see cref="Symbol"/> is already normalized
@@ -71,4 +90,10 @@ internal interface ICallSiteWalker
         SemanticModel semanticModel,
         ISymbol? selfNormalized,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The control-flow constructs enclosing <paramref name="site"/> inside <paramref name="body"/>,
+    /// outermost first. Empty when the site is straight-line code.
+    /// </summary>
+    IReadOnlyList<RawFlowScope> GetFlowContext(SyntaxNode site, SyntaxNode body);
 }

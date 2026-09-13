@@ -44,6 +44,14 @@
           <ButtonText>Traverse Down to Sequence Diagram</ButtonText>
         </Strings>
       </Button>
+      <Button guid="guidEditorCommands" id="TraverseDownToSequenceFlowCommand" priority="0x0104" type="Button">
+        <Parent guid="guidEditorCommands" id="EditorContextMenuGroup" />
+        <Icon guid="ImageCatalogGuid" id="ActivityDiagram" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Traverse Down to Sequence Diagram (with Control Flow)</ButtonText>
+        </Strings>
+      </Button>
     </Buttons>
   </Commands>
 
@@ -54,6 +62,7 @@
       <IDSymbol name="AllReferencesToDgmlCommand" value="0x0101" />
       <IDSymbol name="TraverseDownToDgmlCommand" value="0x0102" />
       <IDSymbol name="TraverseDownToSequenceCommand" value="0x0103" />
+      <IDSymbol name="TraverseDownToSequenceFlowCommand" value="0x0104" />
       <IDSymbol name="EditorContextMenuGroup" value="0x1020" />
     </GuidSymbol>
   </Symbols>

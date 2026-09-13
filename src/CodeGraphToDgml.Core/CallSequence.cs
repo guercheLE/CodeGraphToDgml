@@ -4,12 +4,49 @@ namespace CodeGraphToDgml.Core;
 
 public sealed record CallSequenceParticipant(string Id, string Label);
 
+/// <summary>
+/// Mermaid combined-fragment kinds a call can be enclosed in.
+/// <c>Alt</c> renders sections separated by <c>else</c>, <c>Par</c> by <c>and</c>,
+/// <c>Critical</c> by <c>option</c>; <c>Opt</c>, <c>Loop</c>, and <c>Break</c> have one section.
+/// </summary>
+public enum SequenceFragmentKind
+{
+    Alt,
+    Opt,
+    Loop,
+    Break,
+    Par,
+    Critical,
+}
+
+/// <summary>
+/// One enclosing fragment level of a call, relative to the sibling list the call lives in.
+/// </summary>
+/// <param name="InstanceId">
+/// Identifies the fragment instance among siblings, so two consecutive <c>if (x)</c> statements
+/// (different instances, same label) are rendered as two fragments, while two calls inside one
+/// <c>if</c> share a fragment.
+/// </param>
+/// <param name="Kind">The Mermaid fragment keyword.</param>
+/// <param name="SectionIndex">Zero-based section within the instance (0 = the first branch).</param>
+/// <param name="Label">Section label (condition text, loop header, <c>else</c>, ...).</param>
+public sealed record CallSequenceFragmentScope(int InstanceId, SequenceFragmentKind Kind, int SectionIndex, string Label);
+
 public sealed record CallSequenceCallNode(
     string CallerParticipantId,
     string CalleeParticipantId,
     string MessageLabel,
     IReadOnlyList<CallSequenceCallNode> NestedCalls,
-    string ReturnTypeLabel = "");
+    string ReturnTypeLabel = "")
+{
+    /// <summary>
+    /// Control-flow fragments enclosing this call within its sibling list, outermost first.
+    /// Empty for plain calls, which is also the default, so callers that do not model control
+    /// flow are unaffected. Adjacent siblings sharing a prefix of the same fragment instances are
+    /// rendered inside one fragment; a fragment never appears without at least one call inside.
+    /// </summary>
+    public IReadOnlyList<CallSequenceFragmentScope> FragmentPath { get; init; } = [];
+}
 
 public sealed class CallSequence
 {
