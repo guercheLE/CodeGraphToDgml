@@ -20,7 +20,7 @@ jobs:
     name: Build and test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -75,7 +75,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Verify tag matches Directory.Build.props
         run: |
@@ -106,7 +106,7 @@ jobs:
     # Marketplace publishing needs a manual approval after the GitHub release is created.
     environment: marketplace
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/download-artifact@v4
         with:
