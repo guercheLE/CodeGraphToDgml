@@ -295,7 +295,7 @@ internal sealed class RoslynReferencesProvider
 
         if (!options.IncludeGeneratedCode
             && sourceLocation is not null
-            && IsGenerated(sourceLocation.SourceTree?.FilePath))
+            && CodeGraphToDgml.Roslyn.CallGraphFilters.IsGenerated(sourceLocation.SourceTree?.FilePath))
         {
             return false;
         }
@@ -311,22 +311,5 @@ internal sealed class RoslynReferencesProvider
         }
 
         return true;
-    }
-
-    private static bool IsGenerated(string? filePath)
-    {
-        if (string.IsNullOrWhiteSpace(filePath))
-        {
-            return false;
-        }
-
-        var fileName = System.IO.Path.GetFileName(filePath) ?? string.Empty;
-        return fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase)
-            || fileName.EndsWith(".g.vb", StringComparison.OrdinalIgnoreCase)
-            || fileName.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase)
-            || fileName.EndsWith(".designer.vb", StringComparison.OrdinalIgnoreCase)
-            || fileName.EndsWith(".generated.cs", StringComparison.OrdinalIgnoreCase)
-            || fileName.EndsWith(".generated.vb", StringComparison.OrdinalIgnoreCase)
-            || filePath!.IndexOf("\\obj\\", StringComparison.OrdinalIgnoreCase) >= 0;
     }
 }

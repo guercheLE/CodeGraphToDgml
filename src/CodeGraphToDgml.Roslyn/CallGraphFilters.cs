@@ -56,7 +56,8 @@ public static class CallGraphFilters
         };
     }
 
-    private static bool IsGenerated(string? filePath)
+    /// <summary>True for designer, .g., .generated, and obj\ files (generated code).</summary>
+    public static bool IsGenerated(string? filePath)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {

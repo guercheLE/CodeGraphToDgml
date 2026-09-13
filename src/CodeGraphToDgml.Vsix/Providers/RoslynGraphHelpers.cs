@@ -187,14 +187,10 @@ internal static class RoslynGraphHelpers
         return id;
     }
 
+    /// <summary>Single normalization rule shared with the call-graph walker (accessors, reduced extension methods, original definitions).</summary>
     internal static ISymbol? NormalizeSymbol(ISymbol? symbol)
     {
-        if (symbol is IMethodSymbol method && method.AssociatedSymbol is not null)
-        {
-            symbol = method.AssociatedSymbol;
-        }
-
-        return symbol?.OriginalDefinition;
+        return CodeGraphToDgml.Roslyn.CallGraphSyntaxWalker.NormalizeSymbol(symbol);
     }
 
     internal static string GetNodeLabel(ISymbol symbol)

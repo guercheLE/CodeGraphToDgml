@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using CodeGraphToDgml.Roslyn;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.VisualBasic;
 using Microsoft.CodeAnalysis.Text;
 
 namespace CodeGraphToDgml.Tests;
@@ -44,7 +45,7 @@ internal static class RoslynTestFixture
             "TestAssembly",
             LanguageNames.CSharp,
             compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
-            parseOptions: new CSharpParseOptions(LanguageVersion.Latest));
+            parseOptions: new CSharpParseOptions(Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest));
 
         var solution = workspace.CurrentSolution
             .AddProject(projectInfo)
@@ -52,6 +53,36 @@ internal static class RoslynTestFixture
 
         var documentId = DocumentId.CreateNewId(projectId);
         solution = solution.AddDocument(documentId, "Test.cs", SourceText.From(source));
+
+        return (solution, documentId);
+    }
+
+    /// <summary>
+    /// Visual Basic counterpart of <see cref="CreateSolution"/>. Option Strict is on so every call
+    /// binds to a symbol (no late binding), and <c>System</c> is a global import so delegate and
+    /// event types resolve without an explicit <c>Imports</c>.
+    /// </summary>
+    public static (Solution Solution, DocumentId DocumentId) CreateVisualBasicSolution(string source)
+    {
+        var workspace = new AdhocWorkspace();
+        var projectId = ProjectId.CreateNewId();
+        var projectInfo = ProjectInfo.Create(
+            projectId,
+            VersionStamp.Create(),
+            "TestProject",
+            "TestAssembly",
+            LanguageNames.VisualBasic,
+            compilationOptions: new VisualBasicCompilationOptions(OutputKind.DynamicallyLinkedLibrary)
+                .WithOptionStrict(OptionStrict.On)
+                .WithGlobalImports(GlobalImport.Parse("System", "System.Collections.Generic")),
+            parseOptions: new VisualBasicParseOptions(Microsoft.CodeAnalysis.VisualBasic.LanguageVersion.Latest));
+
+        var solution = workspace.CurrentSolution
+            .AddProject(projectInfo)
+            .AddMetadataReferences(projectId, SystemReferences.Value);
+
+        var documentId = DocumentId.CreateNewId(projectId);
+        solution = solution.AddDocument(documentId, "Test.vb", SourceText.From(source));
 
         return (solution, documentId);
     }
@@ -83,7 +114,7 @@ internal static class RoslynTestFixture
     /// </summary>
     public static async Task<Solution> CreateSolutionWithExternalLibraryAsync(string externalSource, string mainSource)
     {
-        var externalTree = CSharpSyntaxTree.ParseText(externalSource, new CSharpParseOptions(LanguageVersion.Latest));
+        var externalTree = CSharpSyntaxTree.ParseText(externalSource, new CSharpParseOptions(Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest));
         var externalCompilation = CSharpCompilation.Create(
             "ExternalLib",
             [externalTree],
@@ -110,7 +141,7 @@ internal static class RoslynTestFixture
             "TestAssembly",
             LanguageNames.CSharp,
             compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
-            parseOptions: new CSharpParseOptions(LanguageVersion.Latest));
+            parseOptions: new CSharpParseOptions(Microsoft.CodeAnalysis.CSharp.LanguageVersion.Latest));
 
         var solution = workspace.CurrentSolution
             .AddProject(projectInfo)

@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Traverse Down and Traverse Down to Sequence Diagram now work for Visual Basic. The call-site walker was C#-only and silently returned no callees for VB members; a Visual Basic walker now mirrors every C# call shape, including parenless calls.
 - Traverse Down (DGML and sequence diagram) now follows virtual and abstract overrides in derived types using `Overrides` links, as the README already described.
 - `Overrides` links have a category definition and a style; they used to render as unstyled default links.
 - Appending into a DGML document that has no `Styles` element now adds the styles instead of leaving the graph unstyled forever.

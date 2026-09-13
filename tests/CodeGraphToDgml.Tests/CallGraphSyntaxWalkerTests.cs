@@ -936,4 +936,60 @@ public class Caller
         Assert.AreEqual(1, callees.Count(c => c.Name == "Ext"),
             "Instance-style and static-style calls to the same extension method must normalize to one callee.");
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Golden ordering — locks the exact callee order FindCalleesAsync produces, since both the
+    // DGML link order and the sequence-diagram arrow order depend on it. Any walker refactor must
+    // keep this test green unchanged.
+    // ──────────────────────────────────────────────────────────────────────────
+
+    private const string GoldenOrderingSource = @"
+public class Helper { public void Assist() { } }
+public class Product { public void Ship() { } }
+public class Client
+{
+    public Helper Helper { get; } = new Helper();
+    public Client GetClient() => this;
+    public Product GetProduct() => new Product();
+}
+public class Publisher { public event System.EventHandler Changed; }
+public static class Runner { public static void Invoke(System.Action callback) { } }
+
+public class Worker
+{
+    public void Callback() { }
+    public void OnChanged(object sender, System.EventArgs e) { }
+
+    public void Run(Client client, Publisher pub)
+    {
+        client.Helper.Assist();
+        client.GetClient().GetProduct().Ship();
+        Runner.Invoke(Callback);
+        pub.Changed += OnChanged;
+        var p = new Product();
+        client.Helper.Assist();
+    }
+}
+";
+
+    [TestMethod]
+    public async Task FindCalleesAsync_GoldenOrdering_ChainedBeforeMain_ArgsAfter_SubscriptionsLast()
+    {
+        var (solution, _) = RoslynTestFixture.CreateSolution(GoldenOrderingSource);
+        var callees = await RoslynTestFixture.GetCalleesAsync(solution, "Worker", "Run");
+
+        var expected = string.Join("\n",
+            "Helper:Client:",                // chained property read, inserted before its invocation
+            "Assist:Helper:",
+            "GetClient:Client:",
+            "GetProduct:Client:GetClient",   // fluent receiver metadata
+            "Ship:Product:GetProduct",
+            "Invoke:Runner:",
+            "Callback:Worker:",              // method-group argument, after its invocation
+            ".ctor:Product:",
+            "OnChanged:Worker:");            // event subscription pass runs last
+
+        var actual = string.Join("\n", callees.Select(c => $"{c.Name}:{c.ContainingTypeName}:{c.FluentReceiverName}"));
+        Assert.AreEqual(expected, actual);
+    }
 }

@@ -20,7 +20,7 @@ Building and maintaining this took real ideation, time, design effort, and compu
 
 ### Traverse Down to DGML
 
-- traverses callees downward from C# and Visual Basic methods, properties, and events
+- traverses callees downward from C# and Visual Basic methods, properties, and events (VB call sites include parenless calls, `Call`, `RaiseEvent`, `AddHandler`/`RemoveHandler`, `AddressOf`, `With` blocks, and `From`/`With` initializers)
 - follows interface implementations (`Implements` links) and virtual/abstract overrides in derived types (`Overrides` links) so the graph reflects the methods that may actually run at each call site
 - limits traversal by maximum depth and node count
 - filters properties, events, external symbols, and generated code

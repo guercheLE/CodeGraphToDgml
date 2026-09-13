@@ -18,12 +18,6 @@ namespace CodeGraphToDgml.Vsix.Providers;
 
 internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 {
-    private static readonly HashSet<string> SupportedLanguages = new(StringComparer.Ordinal)
-    {
-        LanguageNames.CSharp,
-        LanguageNames.VisualBasic,
-    };
-
     private readonly ToolkitPackage _package;
     private readonly OutputWindowLogger _logger;
 
@@ -538,7 +532,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
         foreach (var documentId in solution.GetDocumentIdsWithFilePath(filePath))
         {
             var document = solution.GetDocument(documentId);
-            if (document is not null && SupportedLanguages.Contains(document.Project.Language))
+            if (document is not null && RoslynGraphHelpers.SupportedLanguages.Contains(document.Project.Language))
             {
                 return document;
             }
@@ -546,7 +540,7 @@ internal sealed class RoslynCallHierarchyProvider : IHierarchyProvider
 
         foreach (var project in solution.Projects)
         {
-            if (!SupportedLanguages.Contains(project.Language))
+            if (!RoslynGraphHelpers.SupportedLanguages.Contains(project.Language))
             {
                 continue;
             }
