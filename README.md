@@ -41,7 +41,7 @@ Building and maintaining this took real ideation, time, design effort, and compu
 - an interface member or virtual method with several implementations renders as one `alt` with a branch per implementing type
 - the same callee reached from two branches appears once per branch; a fragment cut by the diagram splitter is re-opened in the next part with a `(cont.)` marker
 - fragment labels are truncated to `Max condition label length` (default 40)
-- Visual Basic members are rendered without fragments for now (control-flow mapping for VB is pending)
+- Visual Basic: `If`/`ElseIf`/`Else`, single-line `If`, `Select Case`, `If(a, b, c)`, `For`/`For Each`/`While`/`Do` loops, and `Catch` blocks map the same way
 - output files are named `CodeSequenceFlow-{timestamp}.md` / `.html`
 
 ### Common
