@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `MermaidSequenceSerializer` split into a segment-plan builder, a segmenter (layout), a Mermaid text emitter and an HTML renderer under `Core/MermaidSequence/`; the sibling-list/call cycle between two emitter methods is gone. The public API and the output are unchanged.
+- `RoslynCallHierarchyProvider` split into partial files by the kind of call site followed (callers, callees, dispatch, sequence, workspace); sequence building moved to `CallSequenceBuilder`, and the duplicate `GetDocument`/`NormalizePath` copies were removed in favour of `RoslynGraphHelpers`.
+- Serializer tests split into partial-class files by feature area.
+
+### Added
+
+- CI job on Linux that builds and tests Core, Roslyn and the tests with Coverlet coverage (Cobertura report and summary on the run page). The VSIX job stays on Windows.
+- `TreatWarningsAsErrors` for Core, Roslyn and the tests (the VSIX is excluded until its warning baseline is verified on Windows).
+- `SECURITY.md` and `CONTRIBUTING.md`.
+
 ## [0.14.0] - 2026-09-13
 
 ### Fixed

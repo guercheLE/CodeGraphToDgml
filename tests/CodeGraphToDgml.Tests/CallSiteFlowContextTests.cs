@@ -224,7 +224,7 @@ public class " + className + @"
 
         var label = sites.Single().FragmentPath.Single().Label;
         Assert.AreEqual(12, label.Length, label);
-        Assert.IsTrue(label.EndsWith("…"), label);
+        Assert.EndsWith("…", label, label);
     }
 
     [TestMethod]

@@ -16,8 +16,56 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
+  core:
+    name: Core, Roslyn and tests (Linux, coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # Builds only Core, Roslyn and the test project: the VSIX needs Windows and is built in the job below.
+      - name: Test with coverage
+        run: >-
+          dotnet test tests/CodeGraphToDgml.Tests/CodeGraphToDgml.Tests.csproj -c Release
+          --settings tests/CodeGraphToDgml.Tests/coverlet.runsettings
+          --collect:"XPlat Code Coverage"
+          --logger "trx;LogFileName=test-results.trx"
+          --results-directory TestResults
+
+      - name: Coverage summary
+        if: always()
+        shell: python
+        run: |
+          import glob, os, xml.etree.ElementTree as ET
+          reports = glob.glob("TestResults/**/coverage.cobertura.xml", recursive=True)
+          lines = ["## Code coverage", ""]
+          if not reports:
+              lines.append("No coverage report was produced.")
+          else:
+              root = ET.parse(reports[0]).getroot()
+              lines += ["| Package | Lines | Branches |", "| --- | ---: | ---: |"]
+              for pkg in root.iter("package"):
+                  lines.append(f"| {pkg.get('name')} | {float(pkg.get('line-rate')):.1%} | {float(pkg.get('branch-rate')):.1%} |")
+              lines.append(f"| **Total** | **{float(root.get('line-rate')):.1%}** | **{float(root.get('branch-rate')):.1%}** |")
+          text = "\n".join(lines) + "\n"
+          print(text)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write(text)
+
+      - name: Upload test results and coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-linux
+          path: |
+            TestResults/*.trx
+            TestResults/**/coverage.cobertura.xml
+
   build:
-    name: Build and test
+    name: Build and test (Windows, VSIX)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -41,7 +89,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-windows
           path: TestResults/*.trx
 
       - name: Verify VSIX manifest version matches Directory.Build.props
@@ -70,7 +118,7 @@ jobs:
   release:
     name: GitHub release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [core, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

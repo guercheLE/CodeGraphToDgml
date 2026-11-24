@@ -5,4 +5,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Version>0.14.0</Version>
   </PropertyGroup>
+
+  <!--
+    Warnings are errors for the libraries and the tests (all of which build on any OS).
+    The VSIX is left out for now: it only builds on Windows with the VS SDK analyzers, so its
+    warning baseline has not been verified yet. Remove the condition once CI shows it is clean.
+  -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' != 'CodeGraphToDgml.Vsix'">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
 </Project>

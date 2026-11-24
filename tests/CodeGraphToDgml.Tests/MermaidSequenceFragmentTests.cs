@@ -209,9 +209,9 @@ public sealed class MermaidSequenceFragmentTests
         var sections = Sections(markdown);
 
         Assert.IsGreaterThanOrEqualTo(2, sections.Count, markdown);
-        Assert.IsTrue(sections[0].Contains("    loop for\n"), sections[0]);
-        Assert.IsFalse(sections[0].Contains("(cont.)"), sections[0]);
-        Assert.IsTrue(sections[1].Contains("    loop for (cont.)\n"), sections[1]);
+        Assert.Contains("    loop for\n", sections[0], sections[0]);
+        Assert.DoesNotContain("(cont.)", sections[0], sections[0]);
+        Assert.Contains("    loop for (cont.)\n", sections[1], sections[1]);
         foreach (var section in sections)
             AssertFragmentsBalanced(section);
     }
@@ -229,7 +229,7 @@ public sealed class MermaidSequenceFragmentTests
         var sections = Sections(markdown);
 
         Assert.IsGreaterThanOrEqualTo(2, sections.Count, markdown);
-        Assert.IsTrue(sections[1].Contains("    alt else (cont.)\n"), sections[1]);
+        Assert.Contains("    alt else (cont.)\n", sections[1], sections[1]);
         foreach (var section in sections)
             AssertFragmentsBalanced(section);
     }
@@ -263,7 +263,7 @@ public sealed class MermaidSequenceFragmentTests
         // The participant cap (5) forces a cut in both cases; the seam alone would too, so make
         // the cap generous to isolate the seam behaviour:
         var seamOnly = Sections(serializer.BuildMarkdown(seq, stackedActivationBars: false, autoNumber: false, maxParticipantsPerDiagram: 100, maxMessagesPerDiagram: 0));
-        Assert.AreEqual(1, seamOnly.Count, "Sharing a fragment must suppress the soft seam.");
+        Assert.HasCount(1, seamOnly, "Sharing a fragment must suppress the soft seam.");
 
         Assert.IsGreaterThanOrEqualTo(2, lenient.Count, "The participant cap must still cut inside the fragment.");
         Assert.IsGreaterThanOrEqualTo(2, lenientNoLoop.Count);
@@ -290,9 +290,9 @@ public sealed class MermaidSequenceFragmentTests
         var sections = Sections(markdown);
 
         Assert.IsGreaterThanOrEqualTo(2, sections.Count, markdown);
-        Assert.IsTrue(sections[0].Contains("    opt enabled\n    A->>+B: big\n"), sections[0]);
-        Assert.IsTrue(sections[1].Contains("    opt enabled (cont.)\n    activate B\n"), sections[1]);
-        Assert.IsTrue(sections[sections.Count - 1].Contains("B-->>-A: big\n    end"), sections[sections.Count - 1]);
+        Assert.Contains("    opt enabled\n    A->>+B: big\n", sections[0], sections[0]);
+        Assert.Contains("    opt enabled (cont.)\n    activate B\n", sections[1], sections[1]);
+        Assert.Contains("B-->>-A: big\n    end", sections[sections.Count - 1], sections[sections.Count - 1]);
         foreach (var section in sections)
         {
             AssertFragmentsBalanced(section);
@@ -336,7 +336,7 @@ public sealed class MermaidSequenceFragmentTests
         // 3 arrows, cap 3: fragments add 6 extra lines but must not trigger a split.
         var markdown = new MermaidSequenceSerializer().BuildMarkdown(seq, stackedActivationBars: false, autoNumber: false, maxParticipantsPerDiagram: 0, maxMessagesPerDiagram: 3);
 
-        Assert.AreEqual(1, Sections(markdown).Count, markdown);
+        Assert.HasCount(1, Sections(markdown), markdown);
     }
 
     // ── Simulators ────────────────────────────────────────────────────────────
@@ -368,13 +368,13 @@ public sealed class MermaidSequenceFragmentTests
                     Assert.IsTrue(stack.Count > 0 && stack.Peek() == "critical", $"'option' outside critical at '{line}' in:\n{diagram}");
                     break;
                 case "end":
-                    Assert.IsTrue(stack.Count > 0, $"'end' without an open fragment in:\n{diagram}");
+                    Assert.IsNotEmpty(stack, $"'end' without an open fragment in:\n{diagram}");
                     stack.Pop();
                     break;
             }
         }
 
-        Assert.AreEqual(0, stack.Count, $"{stack.Count} fragment(s) left open in:\n{diagram}");
+        Assert.IsEmpty(stack, $"{stack.Count} fragment(s) left open in:\n{diagram}");
     }
 
     internal static void AssertActivationsBalanced(string diagram)
