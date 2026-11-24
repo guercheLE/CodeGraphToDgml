@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-11-24
+
 ### Changed
 
 - `MermaidSequenceSerializer` split into a segment-plan builder, a segmenter (layout), a Mermaid text emitter and an HTML renderer under `Core/MermaidSequence/`; the sibling-list/call cycle between two emitter methods is gone. The public API and the output are unchanged.
@@ -170,7 +172,8 @@ All notable changes to this project are documented here. The format follows
 
 - Initial release: "Traverse Up to DGML" and "All References to DGML" from the editor context menu, with append/replace into an existing DGML document.
 
-[Unreleased]: https://github.com/guercheLE/CodeGraphToDgml/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/guercheLE/CodeGraphToDgml/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/guercheLE/CodeGraphToDgml/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/guercheLE/CodeGraphToDgml/compare/v0.13.2...v0.14.0
 [0.13.2]: https://github.com/guercheLE/CodeGraphToDgml/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/guercheLE/CodeGraphToDgml/compare/v0.13.0...v0.13.1
